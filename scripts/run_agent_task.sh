@@ -12,6 +12,8 @@ need_cmd python
 AGENT_NAME="$1"
 TASK_FILE="$2"
 
+safe_run_id "$AGENT_NAME" || die "unsafe_agent_name"
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not_inside_git_repo"
 cd "$ROOT"
 
@@ -21,12 +23,13 @@ if [[ -n "$(git status --porcelain)" ]]; then
   die "target_repo_dirty"
 fi
 
+AGENT_ADAPTER="$ROOT/agents/$AGENT_NAME.sh"
+
 RUN_ID="$(date -u +"%Y%m%d-%H%M%S")"
 RUN_DIR="$ROOT/runs/$RUN_ID"
 BASE_SHA="$(git rev-parse HEAD)"
 AGENT_WT="$ROOT/../agent-$RUN_ID"
 PATCH_SHA=""
-FAILURE_REASON=""
 
 mkdir -p "$RUN_DIR"
 cp "$TASK_FILE" "$RUN_DIR/task.md"
@@ -69,39 +72,16 @@ fail_run() {
   echo "AGENT_NAME=$AGENT_NAME"
   echo "BASE_SHA=$BASE_SHA"
   echo "TASK_FILE=$TASK_FILE"
+  echo "AGENT_ADAPTER=$AGENT_ADAPTER"
 } >> "$RUN_DIR/stdout.log"
 
-if [[ "$AGENT_NAME" != "manual-simulated-agent" ]]; then
-  fail_run "unsupported_agent_for_v0_1"
-fi
+[[ -x "$AGENT_ADAPTER" ]] || fail_run "agent_adapter_not_found"
 
 git worktree add --detach "$AGENT_WT" "$BASE_SHA" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_worktree_create_failed"
 
-python - "$RUN_DIR/task.md" "$AGENT_WT/app/target.py" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" <<'PY' \
+"$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_execution_failed"
-import re
-import sys
-from pathlib import Path
-
-task_path = Path(sys.argv[1])
-target_path = Path(sys.argv[2])
-
-task = task_path.read_text(encoding="utf-8")
-match = re.search(r"returns this exact value:\s*\n\s*([A-Za-z0-9_-]+)", task)
-
-if not match:
-    raise SystemExit("task_missing_return_value")
-
-value = match.group(1)
-
-target_path.write_text(
-    f'def answer():\n    return "{value}"\n',
-    encoding="utf-8",
-)
-
-print(f"manual simulated agent wrote answer() return value: {value}")
-PY
 
 git -C "$AGENT_WT" diff --binary > "$RUN_DIR/patch.diff" \
   || fail_run "patch_capture_failed"
