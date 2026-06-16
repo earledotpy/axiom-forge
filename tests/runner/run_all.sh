@@ -105,10 +105,17 @@ expect_runner_fail \
   "adapter_changed_head" \
   bash scripts/run_agent_task.sh bad-commit-agent tasks/change-answer.task.md
 
-expect_runner_fail \
-  "R3_adapter_branch_records_failure" \
-  "adapter_left_detached_head" \
-  bash scripts/run_agent_task.sh bad-branch-agent tasks/change-answer.task.md
+if bash scripts/run_agent_task.sh bad-branch-agent tasks/change-answer.task.md >/tmp/axiom-runner-test.out 2>/tmp/axiom-runner-test.err; then
+  fail "R3_adapter_branch_records_failure"
+else
+  RUN_ID="$(latest_numeric_run)"
+  if grep -q '"failure_reason": "adapter_left_detached_head"\|"failure_reason": "adapter_created_or_deleted_branch"' "runs/$RUN_ID/record.json"; then
+    pass "R3_adapter_branch_records_failure"
+  else
+    fail "R3_adapter_branch_records_failure wrong failure reason"
+    cat "runs/$RUN_ID/record.json" >&2
+  fi
+fi
 
 expect_runner_fail \
   "R4_empty_patch_records_failure" \

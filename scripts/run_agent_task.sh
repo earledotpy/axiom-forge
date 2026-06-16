@@ -25,7 +25,11 @@ fi
 
 AGENT_ADAPTER="$ROOT/agents/$AGENT_NAME.sh"
 
-RUN_ID="$(date -u +"%Y%m%d-%H%M%S")"
+RUN_ID="$(python - <<'PYID'
+from datetime import datetime, timezone
+print(datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"))
+PYID
+)"
 RUN_DIR="$ROOT/runs/$RUN_ID"
 BASE_SHA="$(git rev-parse HEAD)"
 AGENT_WT="$ROOT/../agent-$RUN_ID"
