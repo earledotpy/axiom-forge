@@ -26,7 +26,9 @@ PROMOTION_FILE="$RUN_DIR/promotion.json"
 
 RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
+DEFAULT_BASE="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" project.default_base)" || die "malformed_gate_toml"
 BRANCH_PREFIX="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" promotion.branch_prefix)" || die "malformed_gate_toml"
+REQUIRE_CURRENT_BASE="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" promotion.require_current_base)" || die "malformed_gate_toml"
 BRANCH="${BRANCH_PREFIX}${RUN_ID}"
 
 GATE_WT=""
@@ -70,6 +72,11 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 if [[ "$REQUIRE_CURRENT_BASE" == "true" ]]; then
+  CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
+  [[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
+fi
+
+if [[ "$REQUIRE_CURRENT_BASE" == "True" || "$REQUIRE_CURRENT_BASE" == "true" ]]; then
   CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
   [[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
 fi
