@@ -1,2 +1,2 @@
 def answer():
-    return "base"
+    return "promoted"
