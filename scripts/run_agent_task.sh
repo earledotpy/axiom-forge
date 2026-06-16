@@ -80,8 +80,32 @@ fail_run() {
 git worktree add --detach "$AGENT_WT" "$BASE_SHA" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_worktree_create_failed"
 
+ADAPTER_START_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
+  || fail_run "adapter_start_head_lookup_failed"
+
+BRANCHES_BEFORE="$(git for-each-ref --format="%(refname)" refs/heads)" \
+  || fail_run "adapter_branch_snapshot_failed"
+
 "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_execution_failed"
+
+ADAPTER_END_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
+  || fail_run "adapter_end_head_lookup_failed"
+
+if [[ "$ADAPTER_START_HEAD" != "$ADAPTER_END_HEAD" ]]; then
+  fail_run "adapter_changed_head"
+fi
+
+if git -C "$AGENT_WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
+  fail_run "adapter_left_detached_head"
+fi
+
+BRANCHES_AFTER="$(git for-each-ref --format="%(refname)" refs/heads)" \
+  || fail_run "adapter_branch_snapshot_failed"
+
+if [[ "$BRANCHES_BEFORE" != "$BRANCHES_AFTER" ]]; then
+  fail_run "adapter_created_or_deleted_branch"
+fi
 
 git -C "$AGENT_WT" diff --binary > "$RUN_DIR/patch.diff" \
   || fail_run "patch_capture_failed"
