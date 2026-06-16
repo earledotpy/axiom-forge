@@ -69,3 +69,28 @@ The adapter must:
 * leave a diff,
 * exit nonzero on failure.
 
+
+## Adapter Experiment Result
+
+Antigravity was tested through:
+
+```bash
+bash scripts/run_agent_task.sh antigravity tasks/antigravity-change-answer.task.md
+````
+
+Observed result:
+
+* run directory validated,
+* patch verification passed,
+* promotion succeeded,
+* gate branch was created,
+* diff changed `app/target.py` from `base` to `antigravity-promoted`.
+
+Caveat:
+
+* the generated patch added a blank line at EOF,
+* `git apply` reported a whitespace warning.
+
+Decision:
+
+Antigravity is callable and adapter-compatible, but patch hygiene should be enforced before treating it as a standard trusted adapter.
