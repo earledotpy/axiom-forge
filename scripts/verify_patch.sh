@@ -37,8 +37,8 @@ trap cleanup EXIT
 
 git worktree add --detach "$VERIFY_WT" "$BASE_SHA" >/dev/null || die "verify_worktree_create_failed"
 
-git -C "$VERIFY_WT" apply --check "$ROOT/$PATCH" || die "patch_check_failed"
-git -C "$VERIFY_WT" apply "$ROOT/$PATCH" || die "patch_apply_failed"
+git -C "$VERIFY_WT" apply --check --whitespace=error "$ROOT/$PATCH" || die "patch_check_failed"
+git -C "$VERIFY_WT" apply --whitespace=error "$ROOT/$PATCH" || die "patch_apply_failed"
 
 python "$SCRIPT_DIR/verify_target.py" \
   --config "$CONFIG" \

@@ -196,6 +196,36 @@ JSON
 expect_fail "T6_patch_apply_failure_fails" \
   bash scripts/promote.sh "$RUN_DIR"
 
+RUN_ID="test-whitespace-error"
+RUN_DIR="runs/$RUN_ID"
+cleanup_branch "$RUN_ID"
+mkdir -p "$RUN_DIR"
+cat > "$RUN_DIR/patch.diff" <<'PATCH'
+diff --git a/app/target.py b/app/target.py
+--- a/app/target.py
++++ b/app/target.py
+@@ -1,2 +1,3 @@
+ def answer():
+-    return "base"
++    return "whitespace-error"
++    
+PATCH
+PATCH_SHA="$(python scripts/sha256_file.py "$RUN_DIR/patch.diff")"
+cat > "$RUN_DIR/record.json" <<JSON
+{
+  "schema_version": 1,
+  "run_id": "$RUN_ID",
+  "agent": "test-agent",
+  "target_repo": ".",
+  "base_sha": "$(git rev-parse HEAD)",
+  "patch_file": "patch.diff",
+  "patch_sha256": "$PATCH_SHA",
+  "run_status": "COMPLETED"
+}
+JSON
+expect_fail "T7_whitespace_error_fails" \
+  bash scripts/promote.sh "$RUN_DIR"
+
 RUN_ID="test-operator-mismatch"
 cleanup_branch "$RUN_ID"
 make_good_run "$RUN_ID"

@@ -97,8 +97,8 @@ rmdir "$GATE_WT"
 git worktree add -b "$BRANCH" "$GATE_WT" "$BASE_SHA" >/dev/null || fail_closed "gate_worktree_create_failed"
 BRANCH_CREATED=1
 
-git -C "$GATE_WT" apply --check "$ROOT/$PATCH" || fail_closed "gate_patch_check_failed"
-git -C "$GATE_WT" apply "$ROOT/$PATCH" || fail_closed "gate_patch_apply_failed"
+git -C "$GATE_WT" apply --check --whitespace=error "$ROOT/$PATCH" || fail_closed "gate_patch_check_failed"
+git -C "$GATE_WT" apply --whitespace=error "$ROOT/$PATCH" || fail_closed "gate_patch_apply_failed"
 
 git -C "$GATE_WT" add -A
 git -C "$GATE_WT" commit \
