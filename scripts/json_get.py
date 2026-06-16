@@ -21,12 +21,11 @@ def main() -> int:
         print(f"failed to read {sys.argv[2]}: {exc}", file=sys.stderr)
         return 1
 
-    if isinstance(value, bool):
-        print("true" if value else "false")
-    elif value is None:
+    if value is None:
         print("")
     else:
         print(value)
+
     return 0
 
 
