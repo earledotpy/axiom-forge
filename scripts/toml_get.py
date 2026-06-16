@@ -14,24 +14,12 @@ def main() -> int:
         print("usage: toml_get.py <toml_file> <dotted.key>", file=sys.stderr)
         return 2
 
-    path = Path(sys.argv[1])
-    key_path = sys.argv[2].split(".")
+    data = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    value = data
+    for key in sys.argv[2].split("."):
+        value = value[key]
 
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-        value = data
-        for key in key_path:
-            value = value[key]
-    except Exception as exc:
-        print(f"failed to read {sys.argv[2]}: {exc}", file=sys.stderr)
-        return 1
-
-    if isinstance(value, bool):
-        print("true" if value else "false")
-    elif isinstance(value, (str, int, float)):
-        print(value)
-    else:
-        print(value)
+    print(value)
     return 0
 
 
