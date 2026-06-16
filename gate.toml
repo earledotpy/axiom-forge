@@ -17,3 +17,4 @@ promotion_file = "promotion.json"
 require_clean_target = true
 require_operator_run_id = true
 allow_existing_branch = false
+require_current_base = true

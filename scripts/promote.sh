@@ -69,6 +69,11 @@ if [[ -n "$(git status --porcelain)" ]]; then
   fail_closed "target_repo_dirty"
 fi
 
+if [[ "$REQUIRE_CURRENT_BASE" == "true" ]]; then
+  CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
+  [[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
+fi
+
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || fail_closed "invalid_gate_branch_name"
 
 if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
