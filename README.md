@@ -168,6 +168,20 @@ persistent autonomous agents,
 cryptographic approvals,
 container sandboxing.
 Those features require evidence from actual run records or explicit operator decisions.
+
+## Scope Discipline
+
+Axiom Forge stays deliberately narrow: it captures, verifies, and promotes
+agent-produced patches; it does not become the system that schedules or
+coordinates agents.
+
+Any expansion beyond the current gate should be justified by a captured run,
+a recorded failure, or an explicit operator decision.
+
+Git worktrees isolate repository changes for this workflow. They are not a
+claim of general OS-level containment; container sandboxing remains outside
+v0.1.
+
 Baseline
 The local v0.1 baseline is proven when:
 ```bash
