@@ -113,7 +113,7 @@ cat "runs/$RUN_ID/record.json"
 Check:
 
 ```text
-run_id matches the directory name
+run_id exactly matches the directory name (enforced by validate_run_dir.sh)
 agent is the adapter you intended to run
 base_sha is the expected base commit
 run_status is COMPLETED before promotion is considered

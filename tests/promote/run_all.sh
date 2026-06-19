@@ -149,6 +149,47 @@ JSON
 expect_fail "T4_invalid_run_id_fails" \
   bash scripts/promote.sh "$RUN_DIR"
 
+RUN_ID="test-run-id-directory"
+RECORD_RUN_ID="test-run-id-record"
+RUN_DIR="runs/$RUN_ID"
+cleanup_branch "$RUN_ID"
+cleanup_branch "$RECORD_RUN_ID"
+mkdir -p "$RUN_DIR"
+cat > "$RUN_DIR/patch.diff" <<'PATCH'
+diff --git a/app/target.py b/app/target.py
+--- a/app/target.py
++++ b/app/target.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return "base"
++    return "mismatched-run-id"
+PATCH
+PATCH_SHA="$(python scripts/sha256_file.py "$RUN_DIR/patch.diff")"
+cat > "$RUN_DIR/record.json" <<JSON
+{
+  "schema_version": 1,
+  "run_id": "$RECORD_RUN_ID",
+  "agent": "test-agent",
+  "target_repo": ".",
+  "base_sha": "$(git rev-parse HEAD)",
+  "patch_file": "patch.diff",
+  "patch_sha256": "$PATCH_SHA",
+  "run_status": "COMPLETED"
+}
+JSON
+expect_fail "T4a_run_id_directory_mismatch_fails_validation" \
+  bash scripts/validate_run_dir.sh "$RUN_DIR"
+expect_fail "T4b_run_id_directory_mismatch_fails_promotion" \
+  bash scripts/promote.sh "$RUN_DIR"
+
+if git show-ref --verify --quiet "refs/heads/gate/$RECORD_RUN_ID"; then
+  fail "T4c_run_id_directory_mismatch_creates_no_gate_branch"
+else
+  pass "T4c_run_id_directory_mismatch_creates_no_gate_branch"
+fi
+cleanup_branch "$RUN_ID"
+cleanup_branch "$RECORD_RUN_ID"
+
 RUN_ID="test-bad-base"
 RUN_DIR="runs/$RUN_ID"
 cleanup_branch "$RUN_ID"

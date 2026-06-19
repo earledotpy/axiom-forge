@@ -11,6 +11,7 @@ need_cmd python
 
 RUN_DIR="$1"
 [[ -d "$RUN_DIR" ]] || die "missing_run_dir"
+RUN_DIR_NAME="$(basename -- "$RUN_DIR")"
 
 RECORD="$RUN_DIR/record.json"
 PATCH="$RUN_DIR/patch.diff"
@@ -20,6 +21,7 @@ PATCH="$RUN_DIR/patch.diff"
 
 RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
 safe_run_id "$RUN_ID" || die "unsafe_run_id"
+[[ "$RUN_ID" == "$RUN_DIR_NAME" ]] || die "run_id_directory_mismatch"
 
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
 RUN_STATUS="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_status)" || die "missing_run_status"
