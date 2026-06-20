@@ -209,6 +209,52 @@ JSON
 expect_fail "T5_bad_base_sha_fails" \
   bash scripts/promote.sh "$RUN_DIR"
 
+RUN_ID="test-stale-current-base"
+RUN_DIR="runs/$RUN_ID"
+DEFAULT_BASE="$(python scripts/toml_get.py gate.toml project.default_base)"
+STALE_BASE_SHA="$(git rev-parse "$DEFAULT_BASE^")"
+cleanup_branch "$RUN_ID"
+mkdir -p "$RUN_DIR"
+cat > "$RUN_DIR/patch.diff" <<'PATCH'
+diff --git a/app/target.py b/app/target.py
+--- a/app/target.py
++++ b/app/target.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return "base"
++    return "stale-base"
+PATCH
+PATCH_SHA="$(python scripts/sha256_file.py "$RUN_DIR/patch.diff")"
+cat > "$RUN_DIR/record.json" <<JSON
+{
+  "schema_version": 1,
+  "run_id": "$RUN_ID",
+  "agent": "test-agent",
+  "target_repo": ".",
+  "base_sha": "$STALE_BASE_SHA",
+  "patch_file": "patch.diff",
+  "patch_sha256": "$PATCH_SHA",
+  "run_status": "COMPLETED"
+}
+JSON
+expect_pass "T5a_stale_existing_base_validates" \
+  bash scripts/validate_run_dir.sh "$RUN_DIR"
+expect_fail "T5b_stale_current_base_fails_promotion" \
+  bash scripts/promote.sh "$RUN_DIR"
+
+if grep -q '"reason": "stale_base_sha"' "$RUN_DIR/promotion.json"; then
+  pass "T5c_stale_current_base_records_failure_reason"
+else
+  fail "T5c_stale_current_base_records_failure_reason"
+fi
+
+if git show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
+  fail "T5d_stale_current_base_creates_no_gate_branch"
+else
+  pass "T5d_stale_current_base_creates_no_gate_branch"
+fi
+cleanup_branch "$RUN_ID"
+
 RUN_ID="test-patch-apply-failure"
 RUN_DIR="runs/$RUN_ID"
 cleanup_branch "$RUN_ID"

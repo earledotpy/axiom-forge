@@ -12,6 +12,7 @@ Axiom Forge does not trust agent claims. It trusts captured artifacts, recompute
 - Do not edit `runs/<run-id>/patch.diff`, `record.json`, or `promotion.json` by hand.
 - Do not promote a run unless `verify_patch.sh` passes.
 - Do not weaken the gate to make an adapter pass.
+- Clean target, current base, exact operator approval, and no existing gate branch are fixed fail-closed invariants, not configurable switches.
 - Do not move `v0.1-local`; use new release tags for later release points.
 
 ## Start Of Session
