@@ -6,6 +6,7 @@ cd "$ROOT"
 
 PASS_COUNT=0
 FAIL_COUNT=0
+PARENT_SENTINEL="$ROOT/.axiom-parent-dirty-test"
 
 pass() {
   echo "PASS: $1"
@@ -16,6 +17,12 @@ fail() {
   echo "FAIL: $1" >&2
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
+
+cleanup_parent_sentinel() {
+  rm -f "$PARENT_SENTINEL"
+}
+
+trap cleanup_parent_sentinel EXIT
 
 latest_numeric_run() {
   find runs -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' | sort | tail -n 1
@@ -99,6 +106,29 @@ expect_runner_fail \
   "R1_missing_adapter_records_failure" \
   "agent_adapter_not_found" \
   bash scripts/run_agent_task.sh missing-agent tasks/change-answer.task.md
+
+cleanup_parent_sentinel
+expect_runner_fail \
+  "R2a_parent_dirty_records_failure" \
+  "parent_repo_dirty_after_adapter" \
+  env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh bad-parent-dirty-agent tasks/change-answer.task.md
+
+RUN_ID="$(latest_numeric_run)"
+if grep -q '"run_status": "FAILED"' "runs/$RUN_ID/record.json"; then
+  pass "R2b_parent_dirty_run_not_completed"
+else
+  fail "R2b_parent_dirty_run_not_completed"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
+
+cleanup_parent_sentinel
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  fail "R2c_parent_dirty_sentinel_cleaned"
+  git status --short >&2
+else
+  pass "R2c_parent_dirty_sentinel_cleaned"
+fi
 
 expect_runner_fail \
   "R2_adapter_commit_records_failure" \

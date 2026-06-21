@@ -93,6 +93,10 @@ BRANCHES_BEFORE="$(git for-each-ref --format="%(refname)" refs/heads)" \
 "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_execution_failed"
 
+if [[ -n "$(git status --porcelain)" ]]; then
+  fail_run "parent_repo_dirty_after_adapter"
+fi
+
 ADAPTER_END_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
   || fail_run "adapter_end_head_lookup_failed"
 
