@@ -1,5 +1,27 @@
 # Adapter Evidence Register
 
+## Evidence Record Format
+
+Future evidence for a real CLI adapter must record:
+
+- collection timestamp;
+- adapter name and adapter script;
+- observed CLI command;
+- resolved CLI path;
+- raw observed version line;
+- run ID and base SHA;
+- verification result;
+- promotion result and identifiers, or the exact failed-closed reason; and
+- concise outcome summary.
+
+CLI availability and version observations are not proof of adapter safety or
+trust. Recording this format does not automatically change an adapter's status
+or trust level. Existing historical entries must not be treated as containing a
+version captured at the exact run time unless they explicitly say so.
+
+Antigravity remains experimental unless separately reviewed and approved
+through future evidence and an explicit human decision.
+
 ## Mandate 21 — Codex Full Loop
 
 Status: PASS
