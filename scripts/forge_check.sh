@@ -15,6 +15,10 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+echo "== Gate Contract Matrix =="
+bash tests/gate_contract/run_all.sh
+
+echo
 echo "== Promotion Matrix =="
 bash tests/promote/run_all.sh
 
