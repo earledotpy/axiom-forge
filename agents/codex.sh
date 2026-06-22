@@ -9,10 +9,9 @@ set -Eeuo pipefail
 TASK_FILE="$1"
 WORKTREE="$2"
 
-command -v codex >/dev/null 2>&1 || {
-  echo "codex_cli_not_found" >&2
-  exit 127
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+python "$SCRIPT_DIR/../scripts/capture_cli_provenance.py" \
+  --file "${AXIOM_CLI_PROVENANCE_FILE:-/dev/null}" --command codex
 
 PROMPT="$(
   {

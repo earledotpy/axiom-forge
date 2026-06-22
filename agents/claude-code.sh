@@ -9,10 +9,9 @@ set -Eeuo pipefail
 TASK_FILE="$1"
 WORKTREE="$2"
 
-command -v claude >/dev/null 2>&1 || {
-  echo "claude_cli_not_found" >&2
-  exit 127
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+python "$SCRIPT_DIR/../scripts/capture_cli_provenance.py" \
+  --file "${AXIOM_CLI_PROVENANCE_FILE:-/dev/null}" --command claude
 
 PROMPT="$(
   {

@@ -107,6 +107,28 @@ expect_runner_fail \
   "agent_adapter_not_found" \
   bash scripts/run_agent_task.sh missing-agent tasks/change-answer.task.md
 
+expect_runner_fail \
+  "R1a_missing_cli_records_failure" \
+  "agent_execution_failed" \
+  bash scripts/run_agent_task.sh bad-missing-cli-agent tasks/change-answer.task.md
+
+RUN_ID="$(latest_numeric_run)"
+if python - "runs/$RUN_ID/record.json" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["cli_command"] is None
+assert record["cli_path"] is None
+assert record["cli_version"] is None
+PY
+then
+  pass "R1b_missing_cli_does_not_fabricate_provenance"
+else
+  fail "R1b_missing_cli_does_not_fabricate_provenance"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
+
 cleanup_parent_sentinel
 expect_runner_fail \
   "R2a_parent_dirty_records_failure" \
@@ -164,6 +186,23 @@ expect_runner_pass \
   bash scripts/run_agent_task.sh manual-simulated-agent tasks/change-answer.task.md
 
 RUN_ID="$(cat /tmp/axiom-runner-last-good-run)"
+
+if python - "runs/$RUN_ID/record.json" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["schema_version"] == 2
+assert record["cli_command"] == "python"
+assert record["cli_path"]
+assert record["cli_version"]
+PY
+then
+  pass "R6a_completed_run_records_cli_provenance"
+else
+  fail "R6a_completed_run_records_cli_provenance"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
 
 if bash scripts/verify_patch.sh "runs/$RUN_ID" >/tmp/axiom-runner-verify.out 2>/tmp/axiom-runner-verify.err; then
   pass "R7_good_run_verifies"

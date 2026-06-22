@@ -34,6 +34,10 @@ RUN_DIR="$ROOT/runs/$RUN_ID"
 BASE_SHA="$(git rev-parse HEAD)"
 AGENT_WT="$ROOT/../agent-$RUN_ID"
 PATCH_SHA=""
+CLI_PROVENANCE_FILE="$RUN_DIR/cli-provenance.json"
+CLI_COMMAND=""
+CLI_PATH=""
+CLI_VERSION=""
 
 mkdir -p "$RUN_DIR"
 cp "$TASK_FILE" "$RUN_DIR/task.md"
@@ -53,7 +57,19 @@ write_record() {
     --task-file "task.md" \
     --patch-file "$([[ -s "$RUN_DIR/patch.diff" ]] && echo "patch.diff" || true)" \
     --patch-sha256 "$PATCH_SHA" \
+    --cli-command "$CLI_COMMAND" \
+    --cli-path "$CLI_PATH" \
+    --cli-version "$CLI_VERSION" \
     --failure-reason "$reason"
+}
+
+read_cli_provenance() {
+  [[ -e "$CLI_PROVENANCE_FILE" ]] || return 0
+
+  CLI_COMMAND="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_command)" || return 1
+  CLI_PATH="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_path)" || return 1
+  CLI_VERSION="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_version)" || return 1
+  [[ -n "$CLI_COMMAND" && -n "$CLI_PATH" ]] || return 1
 }
 
 cleanup() {
@@ -90,8 +106,12 @@ ADAPTER_START_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
 BRANCHES_BEFORE="$(git for-each-ref --format="%(refname)" refs/heads)" \
   || fail_run "adapter_branch_snapshot_failed"
 
-"$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
-  || fail_run "agent_execution_failed"
+if ! AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log"; then
+  read_cli_provenance || fail_run "cli_provenance_invalid"
+  fail_run "agent_execution_failed"
+fi
+
+read_cli_provenance || fail_run "cli_provenance_invalid"
 
 if [[ -n "$(git status --porcelain)" ]]; then
   fail_run "parent_repo_dirty_after_adapter"

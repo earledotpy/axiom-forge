@@ -120,6 +120,9 @@ base_sha is the expected base commit
 run_status is COMPLETED before promotion is considered
 patch_file is patch.diff
 patch_sha256 is present
+cli_command identifies the invoked CLI for a real adapter
+cli_path is the resolved executable that produced the patch
+cli_version is the best-effort version observation (or null if unavailable)
 failure_reason is null
 ```
 

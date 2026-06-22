@@ -2,13 +2,24 @@
 
 ## Evidence Record Format
 
-Future evidence for a real CLI adapter must record:
+Every future `record.json` uses schema version 2 and includes these CLI
+provenance fields. A real CLI adapter writes them after resolving its CLI and
+before it invokes that CLI:
+
+- `cli_command`: command name the adapter invoked;
+- `cli_path`: resolved executable path; and
+- `cli_version`: first non-empty line from a best-effort `--version` call, or
+  `null` when that call cannot yield a version.
+
+When an adapter does not invoke a CLI, all three fields are `null`. If its CLI
+is absent, it fails closed and the run remains `FAILED`; it does not fabricate
+provenance.
+
+Future evidence for a real CLI adapter must also record:
 
 - collection timestamp;
 - adapter name and adapter script;
-- observed CLI command;
-- resolved CLI path;
-- raw observed version line;
+- the captured `cli_command`, `cli_path`, and `cli_version` values;
 - run ID and base SHA;
 - verification result;
 - promotion result and identifiers, or the exact failed-closed reason; and
@@ -63,5 +74,5 @@ Status: FAIL_CLOSED_EXPECTED
 Status: PASS
 
 - Promotion matrix: PASS, 13 passed / 0 failed
-- Runner matrix: PASS, 7 passed / 0 failed
+- Runner matrix: PASS, 13 passed / 0 failed
 - Overall: `AXIOM_FORGE_CHECK: PASS`

@@ -39,6 +39,7 @@ experimental   Usable only as a cautious experiment.
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
+| bad-missing-cli-agent  | `agents/bad-missing-cli-agent.sh`  | Missing CLI    | stable       | test-only    | Intentionally fails closed when its required CLI cannot be resolved.                                                         |
 
 ## Adapter Acceptance Criteria
 
