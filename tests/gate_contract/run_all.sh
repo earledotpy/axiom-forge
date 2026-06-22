@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "GATE_CONTRACT_TEST_MATRIX: FAIL" >&2
+  echo "FAIL: not_inside_git_repo" >&2
+  exit 1
+}
+cd "$ROOT"
+
+PASS_COUNT=0
+FAIL_COUNT=0
+
+pass() {
+  echo "PASS: $1"
+  PASS_COUNT=$((PASS_COUNT + 1))
+}
+
+fail() {
+  echo "FAIL: $1" >&2
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+}
+
+PROHIBITED_PATHS=(
+  "scripts/promote.sh"
+  "promote.sh"
+  "scripts/forge_check.sh"
+  "forge_check.sh"
+  "tests/gate_contract/run_all.sh"
+  "gate_contract/run_all.sh"
+)
+
+assert_no_prohibited_reference() {
+  local name="$1"
+  local file="$2"
+  local prohibited
+
+  if [[ ! -f "$file" ]]; then
+    fail "$name missing_inspection_target=$file"
+    return
+  fi
+
+  for prohibited in "${PROHIBITED_PATHS[@]}"; do
+    if grep -F -q -- "$prohibited" "$file"; then
+      fail "$name prohibited_reference=$prohibited"
+      return
+    fi
+  done
+
+  pass "$name"
+}
+
+assert_no_prohibited_reference \
+  "C1_verify_patch_has_no_recursive_reference" \
+  "scripts/verify_patch.sh"
+
+assert_no_prohibited_reference \
+  "C2_verify_target_has_no_recursive_reference" \
+  "scripts/verify_target.py"
+
+if python - "gate.toml" "${PROHIBITED_PATHS[@]}" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+prohibited = sys.argv[2:]
+
+try:
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    required = config["verify"]["required_checks"]
+    checks = config["checks"]
+except Exception as exc:
+    print(f"gate_config_read_error={exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+for name in required:
+    try:
+        command = checks[name]["command"]
+    except Exception as exc:
+        print(f"required_check_read_error={name}: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    command_text = " ".join(str(part) for part in command)
+    for path in prohibited:
+        if path in command_text:
+            print(
+                f"required_check_prohibited_reference={name}:{path}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+PY
+then
+  pass "C3_required_verification_commands_have_no_recursive_reference"
+else
+  fail "C3_required_verification_commands_have_no_recursive_reference"
+fi
+
+if [[ "$FAIL_COUNT" -ne 0 ]]; then
+  echo "GATE_CONTRACT_TEST_MATRIX: FAIL" >&2
+  exit 1
+fi
+
+echo "GATE_CONTRACT_TEST_MATRIX: PASS"
