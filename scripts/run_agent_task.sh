@@ -106,15 +106,24 @@ ADAPTER_START_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
 BRANCHES_BEFORE="$(git for-each-ref --format="%(refname)" refs/heads)" \
   || fail_run "adapter_branch_snapshot_failed"
 
-if ! AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log"; then
-  read_cli_provenance || fail_run "cli_provenance_invalid"
-  fail_run "agent_execution_failed"
+TARGET_STATUS_BEFORE="$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+  || fail_run "target_repo_status_snapshot_failed"
+
+ADAPTER_EXIT=0
+AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
+  || ADAPTER_EXIT=$?
+
+TARGET_STATUS_AFTER="$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+  || fail_run "target_repo_status_snapshot_failed"
+
+if [[ "$TARGET_STATUS_BEFORE" != "$TARGET_STATUS_AFTER" ]]; then
+  fail_run "adapter_modified_outside_worktree"
 fi
 
 read_cli_provenance || fail_run "cli_provenance_invalid"
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  fail_run "parent_repo_dirty_after_adapter"
+if [[ "$ADAPTER_EXIT" -ne 0 ]]; then
+  fail_run "agent_execution_failed"
 fi
 
 ADAPTER_END_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \

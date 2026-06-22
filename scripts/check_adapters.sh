@@ -50,7 +50,7 @@ report_script_adapter() {
 report_cli_adapter() {
   local label="$1"
   local command_name="$2"
-  local status_note="${3:-}"
+  local requirement="$3"
   local path=""
   local version=""
   local line=""
@@ -62,16 +62,16 @@ report_cli_adapter() {
       line="$line, $version"
     fi
     line="$line, path=$path"
-    if [[ -n "$status_note" ]]; then
-      line="$line, $status_note"
-    fi
+    line="$line, $requirement"
     echo "$line"
   else
     line="$label: missing"
-    if [[ -n "$status_note" ]]; then
-      line="$line, $status_note"
-    fi
+    line="$line, $requirement"
     echo "$line"
+    if [[ "$requirement" == "required" ]]; then
+      return 1
+    fi
+    return 0
   fi
 }
 
@@ -79,9 +79,17 @@ echo "ADAPTER_SMOKE_CHECK: START"
 echo
 
 report_script_adapter "manual-simulated-agent" "agents/manual-simulated-agent.sh"
-report_cli_adapter "codex" "codex"
-report_cli_adapter "claude-code" "claude"
-report_cli_adapter "antigravity" "agy" "experimental"
+required_cli_missing=0
+report_cli_adapter "codex" "codex" "required" || required_cli_missing=1
+report_cli_adapter "claude-code" "claude" "required" || required_cli_missing=1
+report_cli_adapter "antigravity" "agy" "optional (experimental)"
+
+if [[ "$required_cli_missing" -ne 0 ]]; then
+  echo
+  echo "ADAPTER_SMOKE_CHECK: FAIL"
+  echo "Reason: required standard adapter CLI unavailable"
+  exit 1
+fi
 
 echo
 echo "ADAPTER_SMOKE_CHECK: PASS"

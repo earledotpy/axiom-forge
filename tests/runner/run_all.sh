@@ -7,6 +7,7 @@ cd "$ROOT"
 PASS_COUNT=0
 FAIL_COUNT=0
 PARENT_SENTINEL="$ROOT/.axiom-parent-dirty-test"
+OUTSIDE_WORKTREE_SENTINEL="$ROOT/tmp/.axiom-outside-worktree-test"
 
 pass() {
   echo "PASS: $1"
@@ -22,7 +23,12 @@ cleanup_parent_sentinel() {
   rm -f "$PARENT_SENTINEL"
 }
 
-trap cleanup_parent_sentinel EXIT
+cleanup_outside_worktree_sentinel() {
+  rm -f "$OUTSIDE_WORKTREE_SENTINEL"
+  rmdir "$ROOT/tmp" 2>/dev/null || true
+}
+
+trap 'cleanup_parent_sentinel; cleanup_outside_worktree_sentinel' EXIT
 
 latest_numeric_run() {
   find runs -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' | sort | tail -n 1
@@ -131,25 +137,40 @@ fi
 
 cleanup_parent_sentinel
 expect_runner_fail \
-  "R2a_parent_dirty_records_failure" \
-  "parent_repo_dirty_after_adapter" \
+  "R2a_parent_write_records_failure" \
+  "adapter_modified_outside_worktree" \
   env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh bad-parent-dirty-agent tasks/change-answer.task.md
 
 RUN_ID="$(latest_numeric_run)"
 if grep -q '"run_status": "FAILED"' "runs/$RUN_ID/record.json"; then
-  pass "R2b_parent_dirty_run_not_completed"
+  pass "R2b_parent_write_run_not_completed"
 else
-  fail "R2b_parent_dirty_run_not_completed"
+  fail "R2b_parent_write_run_not_completed"
   cat "runs/$RUN_ID/record.json" >&2
 fi
 
 cleanup_parent_sentinel
 
 if [[ -n "$(git status --porcelain)" ]]; then
-  fail "R2c_parent_dirty_sentinel_cleaned"
+  fail "R2c_parent_write_sentinel_cleaned"
   git status --short >&2
 else
-  pass "R2c_parent_dirty_sentinel_cleaned"
+  pass "R2c_parent_write_sentinel_cleaned"
+fi
+
+cleanup_outside_worktree_sentinel
+expect_runner_fail \
+  "R2d_outside_worktree_write_records_failure" \
+  "adapter_modified_outside_worktree" \
+  env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh bad-outside-worktree-agent tasks/change-answer.task.md
+
+cleanup_outside_worktree_sentinel
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  fail "R2e_outside_worktree_sentinel_cleaned"
+  git status --short >&2
+else
+  pass "R2e_outside_worktree_sentinel_cleaned"
 fi
 
 expect_runner_fail \

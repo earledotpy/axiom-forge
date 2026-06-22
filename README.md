@@ -73,6 +73,13 @@ change `HEAD`,
 modify files outside the provided worktree,
 depend on access to the main repository.
 If an adapter violates the contract, the runner records a failed run.
+
+The runner snapshots Git status, including ignored paths, immediately before
+and after adapter execution. Any status change in the target checkout outside
+the runner's disposable worktree fails closed with
+`adapter_modified_outside_worktree`. This detects checkout mutations; it is
+not OS-level containment and cannot observe arbitrary paths elsewhere on the
+host.
 Run Directory Contract
 A successful run directory contains:
 ```text
@@ -124,9 +131,14 @@ AXIOM_FORGE_CHECK: PASS
 ```
 This runs:
 ```bash
+bash scripts/check_adapters.sh
 bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
 ```
+
+The health proof requires the CLI-backed standard adapters: `codex` and
+`claude`. `antigravity` (`agy`) is checked and reported but remains optional
+while its adapter is experimental.
 Example: Run a Task with Manual Adapter
 ```bash
 bash scripts/run_agent_task.sh manual-simulated-agent tasks/change-answer.task.md

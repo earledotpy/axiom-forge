@@ -9,6 +9,7 @@ Axiom Forge does not trust agent claims. It trusts captured artifacts, recompute
 - Work from `main`.
 - Keep the working tree clean before running health checks or promotion.
 - Agents may edit only disposable worktrees created by the runner.
+- A run that changes the target checkout outside its worktree fails with `adapter_modified_outside_worktree`; this detects checkout changes, not arbitrary host-path writes.
 - Do not edit `runs/<run-id>/patch.diff`, `record.json`, or `promotion.json` by hand.
 - Do not promote a run unless `verify_patch.sh` passes.
 - Do not weaken the gate to make an adapter pass.
@@ -47,7 +48,8 @@ Expected final line:
 AXIOM_FORGE_CHECK: PASS
 ```
 
-Optional adapter environment check:
+The health proof includes an adapter CLI preflight. Run it directly when
+diagnosing the local environment:
 
 ```bash
 bash scripts/check_adapters.sh
@@ -234,7 +236,10 @@ Adapter missing:
 bash scripts/check_adapters.sh
 ```
 
-If `codex`, `claude-code`, or `antigravity` is missing, fix the local CLI installation before running real adapter tasks.
+`codex` and `claude` are required because they back the standard CLI adapters;
+their absence fails both this preflight and `forge_check.sh`. `agy` is reported
+as optional because `antigravity` remains experimental. Install a missing
+optional CLI before running that specific adapter.
 
 Patch whitespace failure:
 

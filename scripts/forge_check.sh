@@ -15,6 +15,10 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+echo "== Required Adapter CLI Preflight =="
+bash scripts/check_adapters.sh
+
+echo
 echo "== Gate Contract Matrix =="
 bash tests/gate_contract/run_all.sh
 

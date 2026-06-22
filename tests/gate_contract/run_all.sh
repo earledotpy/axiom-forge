@@ -58,6 +58,24 @@ assert_no_prohibited_reference \
   "C2_verify_target_has_no_recursive_reference" \
   "scripts/verify_target.py"
 
+if python - <<'PY'
+from pathlib import Path
+
+forge_check = Path("scripts/forge_check.sh").read_text(encoding="utf-8")
+adapter_check = Path("scripts/check_adapters.sh").read_text(encoding="utf-8")
+
+assert "bash scripts/check_adapters.sh" in forge_check
+assert 'report_cli_adapter "codex" "codex" "required"' in adapter_check
+assert 'report_cli_adapter "claude-code" "claude" "required"' in adapter_check
+assert 'report_cli_adapter "antigravity" "agy" "optional (experimental)"' in adapter_check
+assert "required standard adapter CLI unavailable" in adapter_check
+PY
+then
+  pass "C3_health_check_requires_standard_adapter_clis"
+else
+  fail "C3_health_check_requires_standard_adapter_clis"
+fi
+
 if python - "gate.toml" "${PROHIBITED_PATHS[@]}" <<'PY'
 import sys
 import tomllib
@@ -91,9 +109,9 @@ for name in required:
             raise SystemExit(1)
 PY
 then
-  pass "C3_required_verification_commands_have_no_recursive_reference"
+  pass "C4_required_verification_commands_have_no_recursive_reference"
 else
-  fail "C3_required_verification_commands_have_no_recursive_reference"
+  fail "C4_required_verification_commands_have_no_recursive_reference"
 fi
 
 if [[ "$FAIL_COUNT" -ne 0 ]]; then

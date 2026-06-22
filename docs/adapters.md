@@ -10,6 +10,11 @@ agents/<agent-name>.sh <task_file> <worktree>
 
 The runner creates the worktree, calls the adapter, captures logs, captures the patch, and writes `record.json`.
 
+Before and after invoking an adapter, the runner compares the target
+checkout's Git status including ignored paths. A change fails the run with
+`adapter_modified_outside_worktree`. This is checkout-mutation detection, not
+an OS sandbox or a claim that arbitrary host-path writes are prevented.
+
 Adapters are not trusted to promote code. Promotion is always handled by `scripts/promote.sh`.
 
 ## Status Levels
@@ -40,6 +45,7 @@ experimental   Usable only as a cautious experiment.
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
 | bad-missing-cli-agent  | `agents/bad-missing-cli-agent.sh`  | Missing CLI    | stable       | test-only    | Intentionally fails closed when its required CLI cannot be resolved.                                                         |
+| bad-outside-worktree-agent | `agents/bad-outside-worktree-agent.sh` | Bash        | stable       | test-only    | Intentionally writes an ignored file in the parent checkout to prove outside-worktree detection.                            |
 
 ## Adapter Acceptance Criteria
 
@@ -61,3 +67,11 @@ An adapter may become `standard` only if:
 `manual-simulated-agent`, `codex`, and `claude-code` are standard adapters.
 
 `antigravity` remains experimental until it can repeatedly produce whitespace-clean patches under the hardened gate.
+
+## Health-Proof CLI Preflight
+
+`scripts/forge_check.sh` runs `scripts/check_adapters.sh` before its test
+matrices. The `codex` and `claude` CLIs are required because they support the
+standard CLI adapters. `agy` is reported but optional while `antigravity` is
+experimental. CLI availability is an environment precondition only; it does
+not change adapter trust or substitute for captured run evidence.
