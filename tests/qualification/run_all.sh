@@ -114,5 +114,15 @@ expect_failure \
   qualification-bad-acceptance-agent \
   new-behavior \
   acceptance_failed
+expect_failure \
+  "Q7_edge_case_out_of_scope_patch_fails" \
+  qualification-outside-scope-agent \
+  edge-case \
+  patch_outside_qualification_scope
+expect_failure \
+  "Q8_edge_case_failed_acceptance_fails" \
+  qualification-bad-acceptance-agent \
+  edge-case \
+  acceptance_failed
 
 echo "QUALIFICATION_TEST_MATRIX: PASS"
