@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,10 @@ def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def sha256_file(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--file", required=True)
 parser.add_argument("--status", required=True)
@@ -19,7 +24,9 @@ parser.add_argument("--failure-reason", default="")
 parser.add_argument("--adapter", required=True)
 parser.add_argument("--case", required=True)
 parser.add_argument("--task-file", required=True)
+parser.add_argument("--task-source", required=True)
 parser.add_argument("--allowed-paths-file", required=True)
+parser.add_argument("--acceptance-script", required=True)
 parser.add_argument("--record", required=True)
 parser.add_argument("--adapter-script", required=True)
 parser.add_argument("--adapter-script-revision", default="")
@@ -56,6 +63,17 @@ result = {
     "case": args.case,
     "task_file": args.task_file,
     "allowed_paths": Path(args.allowed_paths_file).read_text(encoding="utf-8").splitlines(),
+    "case_spec": {
+        "task": {"path": args.task_file, "sha256": sha256_file(args.task_source)},
+        "allowed_paths": {
+            "path": f"qualification/cases/{args.case}/allowed-paths.txt",
+            "sha256": sha256_file(args.allowed_paths_file),
+        },
+        "acceptance": {
+            "path": f"qualification/cases/{args.case}/accept.sh",
+            "sha256": sha256_file(args.acceptance_script),
+        },
+    },
     "run_id": None if record is None else record.get("run_id"),
     "base_sha": None if record is None else record.get("base_sha"),
     "patch_sha256": None if record is None else record.get("patch_sha256"),

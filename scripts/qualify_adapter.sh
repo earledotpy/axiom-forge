@@ -57,7 +57,9 @@ write_result() {
     --adapter "$ADAPTER" \
     --case "$CASE" \
     --task-file "qualification/cases/$CASE/task.md" \
+    --task-source "$TASK_FILE" \
     --allowed-paths-file "$ALLOWED_PATHS_FILE" \
+    --acceptance-script "$ACCEPTANCE_SCRIPT" \
     --record "$RUN_DIR/record.json" \
     --adapter-script "agents/$ADAPTER.sh" \
     --adapter-script-revision "${ADAPTER_SCRIPT_REVISION:-}" \

@@ -26,6 +26,9 @@ assert result["scope"] == "PASSED"
 assert result["acceptance"] == "PASSED"
 assert result["adapter_configuration"]["selected_model"]
 assert result["adapter_configuration"]["cli_command"]
+assert result["case_spec"]["task"]["sha256"]
+assert result["case_spec"]["allowed_paths"]["sha256"]
+assert result["case_spec"]["acceptance"]["sha256"]
 PY
 
 echo "PASS: Q1_behavior_change_qualification_succeeds"

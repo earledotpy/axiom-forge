@@ -35,4 +35,8 @@ echo "== Qualification Matrix =="
 bash tests/qualification/run_all.sh
 
 echo
+echo "== Qualification Series Matrix =="
+bash tests/qualification_series/run_all.sh
+
+echo
 echo "AXIOM_FORGE_CHECK: PASS"
