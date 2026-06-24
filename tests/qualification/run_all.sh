@@ -50,10 +50,11 @@ echo "PASS: Q2_new_behavior_qualification_succeeds"
 expect_failure() {
   local name="$1"
   local adapter="$2"
-  local expected_reason="$3"
+  local case="$3"
+  local expected_reason="$4"
   local result
 
-  if (cd "$SANDBOX" && bash scripts/qualify_adapter.sh "$adapter" behavior-change); then
+  if (cd "$SANDBOX" && bash scripts/qualify_adapter.sh "$adapter" "$case"); then
     echo "FAIL: $name unexpectedly succeeded" >&2
     exit 1
   fi
@@ -74,14 +75,27 @@ PY
 expect_failure \
   "Q2_out_of_scope_patch_fails" \
   qualification-outside-scope-agent \
+  behavior-change \
   patch_outside_qualification_scope
 expect_failure \
   "Q3_failed_external_acceptance_fails" \
   qualification-bad-acceptance-agent \
+  behavior-change \
   acceptance_failed
 expect_failure \
   "Q4_missing_identity_fails" \
   qualification-missing-identity-agent \
+  behavior-change \
   adapter_configuration_incomplete
+expect_failure \
+  "Q5_new_behavior_out_of_scope_patch_fails" \
+  qualification-outside-scope-agent \
+  new-behavior \
+  patch_outside_qualification_scope
+expect_failure \
+  "Q6_new_behavior_failed_acceptance_fails" \
+  qualification-bad-acceptance-agent \
+  new-behavior \
+  acceptance_failed
 
 echo "QUALIFICATION_TEST_MATRIX: PASS"
