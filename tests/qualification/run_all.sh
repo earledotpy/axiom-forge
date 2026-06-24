@@ -47,6 +47,23 @@ PY
 
 echo "PASS: Q2_new_behavior_qualification_succeeds"
 
+(cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-edge-case-agent edge-case)
+
+RESULT="$(find "$SANDBOX/runs" -mindepth 2 -maxdepth 2 -path '*/qualification.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+
+python - "$RESULT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+result = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert result["status"] == "PASSED"
+assert result["case"] == "edge-case"
+assert result["acceptance"] == "PASSED"
+PY
+
+echo "PASS: Q3_edge_case_qualification_succeeds"
+
 expect_failure() {
   local name="$1"
   local adapter="$2"
