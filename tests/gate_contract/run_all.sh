@@ -67,7 +67,7 @@ adapter_check = Path("scripts/check_adapters.sh").read_text(encoding="utf-8")
 assert "bash scripts/check_adapters.sh" in forge_check
 assert 'report_cli_adapter "codex" "codex" "required"' in adapter_check
 assert 'report_cli_adapter "claude-code" "claude" "required"' in adapter_check
-assert 'report_cli_adapter "antigravity" "agy" "optional (experimental)"' in adapter_check
+assert 'report_cli_adapter "antigravity" "agy" "required"' in adapter_check
 assert "required standard adapter CLI unavailable" in adapter_check
 PY
 then

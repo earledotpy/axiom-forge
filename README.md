@@ -136,9 +136,8 @@ bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
 ```
 
-The health proof requires the CLI-backed standard adapters: `codex` and
-`claude`. `antigravity` (`agy`) is checked and reported but remains optional
-while its adapter is experimental.
+The health proof requires the CLI-backed standard adapters: `codex`, `claude`,
+and `antigravity` (`agy`).
 Example: Run a Task with Manual Adapter
 ```bash
 bash scripts/run_agent_task.sh manual-simulated-agent tasks/change-answer.task.md

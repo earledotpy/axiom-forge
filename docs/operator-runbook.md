@@ -236,10 +236,8 @@ Adapter missing:
 bash scripts/check_adapters.sh
 ```
 
-`codex` and `claude` are required because they back the standard CLI adapters;
-their absence fails both this preflight and `forge_check.sh`. `agy` is reported
-as optional because `antigravity` remains experimental. Install a missing
-optional CLI before running that specific adapter.
+`codex`, `claude`, and `agy` are required because they back the standard CLI
+adapters; their absence fails both this preflight and `forge_check.sh`.
 
 Patch whitespace failure:
 

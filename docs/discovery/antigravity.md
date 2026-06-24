@@ -91,6 +91,8 @@ Caveat:
 * the generated patch added a blank line at EOF,
 * `git apply` reported a whitespace warning.
 
-Decision:
+Historical decision:
 
-Antigravity is callable and adapter-compatible, but patch hygiene should be enforced before treating it as a standard trusted adapter.
+This discovery result predates the qualification flow. It is superseded by the
+2026-06-24 qualification record in `docs/adapter-evidence.md`, which granted
+Antigravity standard trust for its pinned configuration.

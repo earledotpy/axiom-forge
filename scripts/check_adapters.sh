@@ -82,7 +82,7 @@ report_script_adapter "manual-simulated-agent" "agents/manual-simulated-agent.sh
 required_cli_missing=0
 report_cli_adapter "codex" "codex" "required" || required_cli_missing=1
 report_cli_adapter "claude-code" "claude" "required" || required_cli_missing=1
-report_cli_adapter "antigravity" "agy" "optional (experimental)"
+report_cli_adapter "antigravity" "agy" "required"
 
 if [[ "$required_cli_missing" -ne 0 ]]; then
   echo

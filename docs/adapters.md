@@ -20,7 +20,7 @@ Adapters are not trusted to promote code. Promotion is always handled by `script
 ## Status Levels
 
 ```text
-stable        Passes the runner contract and has produced a promoted gate branch.
+stable        Granted standard trust through documented qualification or a grandfathered decision.
 experimental  Has passed at least one local adapter experiment but has caveats.
 blocked       Present or desired, but not currently adapter-compatible.
 ```
@@ -40,7 +40,7 @@ experimental   Usable only as a cautious experiment.
 | manual-simulated-agent | `agents/manual-simulated-agent.sh` | Python         | stable       | standard     | Deterministic local adapter used for harness proof and debugging.                                                             |
 | codex                  | `agents/codex.sh`                  | `codex`        | stable       | standard     | Proven with Codex CLI 0.137.0. Produces promoted gate branch.                                                                 |
 | claude-code            | `agents/claude-code.sh`            | `claude`       | stable       | standard     | Proven with Claude Code 2.1.170. Produces promoted gate branch.                                                               |
-| antigravity            | `agents/antigravity.sh`            | `agy`          | experimental | experimental | Callable through Git Bash as `agy` 1.0.8. Produced a promoted gate branch, but first run exposed whitespace hygiene warnings. |
+| antigravity            | `agents/antigravity.sh`            | `agy`          | stable       | standard     | Qualified on `agy` 1.0.11 with model `Gemini 3.5 Flash (Low)`; see the evidence register. |
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
@@ -49,29 +49,29 @@ experimental   Usable only as a cautious experiment.
 
 ## Adapter Acceptance Criteria
 
-An adapter may become `standard` only if:
+New adapters may become `standard` only after documented qualification:
 
 * it is callable from Git Bash,
-* it can run from `run_agent_task.sh`,
-* it edits only the provided worktree,
-* it does not commit,
-* it does not create or delete branches,
-* it does not change `HEAD`,
-* it leaves a non-empty patch,
-* the patch passes `verify_patch.sh`,
-* the patch promotes through `promote.sh`,
-* `forge_check.sh` passes after the adapter is added.
+* three contiguous independent qualification cases pass through `qualify_adapter.sh`,
+* each case satisfies the full runner safety contract and patch verification,
+* each patch stays within its operator-controlled allowed-path list,
+* each external acceptance test passes in a fresh verifier worktree, and
+* the three results have the same complete pinned adapter configuration.
+
+Promotion is separate from adapter qualification. Codex and Claude Code retain
+their existing `standard` status under the grandfathered decision.
 
 ## Current Decision
 
-`manual-simulated-agent`, `codex`, and `claude-code` are standard adapters.
-
-`antigravity` remains experimental until it can repeatedly produce whitespace-clean patches under the hardened gate.
+`manual-simulated-agent`, `codex`, `claude-code`, and `antigravity` are
+standard adapters. Antigravity's standard trust applies only to its recorded
+qualification configuration; adapter-script, CLI-version, model, or relevant
+configuration drift invalidates that trust until requalification succeeds.
 
 ## Health-Proof CLI Preflight
 
 `scripts/forge_check.sh` runs `scripts/check_adapters.sh` before its test
-matrices. The `codex` and `claude` CLIs are required because they support the
-standard CLI adapters. `agy` is reported but optional while `antigravity` is
-experimental. CLI availability is an environment precondition only; it does
-not change adapter trust or substitute for captured run evidence.
+matrices. The `codex`, `claude`, and `agy` CLIs are required because they
+support the standard CLI adapters. CLI availability is an environment
+precondition only; it does not change adapter trust or substitute for captured
+run evidence.
