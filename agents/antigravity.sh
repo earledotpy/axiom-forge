@@ -39,7 +39,10 @@ PROMPT="$(
     echo "Do not commit."
     echo "Do not create branches."
     echo "Do not modify files outside this worktree."
-    echo "Keep the existing tests passing."
+    echo "Do not run Axiom Forge runner, qualification, promotion, or test-matrix scripts."
+    echo "Do not run tests/runner/run_all.sh."
+    echo "Do not run scripts/run_agent_task.sh, scripts/qualify_adapter.sh, scripts/promote.sh, scripts/forge_check.sh, or tests/*/run_all.sh."
+    echo "Do not create nested worktrees or invoke agents/bad-*.sh."
     echo
     echo "After editing, stop. Do not wait for further instruction."
     echo

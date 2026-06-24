@@ -114,6 +114,22 @@ else
   fail "C4_required_verification_commands_have_no_recursive_reference"
 fi
 
+if python - <<'PY'
+from pathlib import Path
+
+adapter = Path("agents/antigravity.sh").read_text(encoding="utf-8")
+for required in (
+    "Do not run Axiom Forge runner, qualification, promotion, or test-matrix scripts.",
+    "Do not run tests/runner/run_all.sh.",
+):
+    assert required in adapter
+PY
+then
+  pass "C5_antigravity_prompt_forbids_recursive_harness_execution"
+else
+  fail "C5_antigravity_prompt_forbids_recursive_harness_execution"
+fi
+
 if [[ "$FAIL_COUNT" -ne 0 ]]; then
   echo "GATE_CONTRACT_TEST_MATRIX: FAIL" >&2
   exit 1
