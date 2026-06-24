@@ -1,0 +1,7 @@
+{
+  "selected_model": "Gemini 3.5 Flash (Low)",
+  "relevant_configuration": {
+    "invocation_mode": "print",
+    "prompt_protocol": "isolated-worktree-v1"
+  }
+}

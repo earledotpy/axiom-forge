@@ -10,6 +10,23 @@ TASK_FILE="$1"
 WORKTREE="$2"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+CONFIG_FILE="$SCRIPT_DIR/antigravity.qualification.json"
+MODEL="$(python - "$CONFIG_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    model = config["selected_model"]
+    assert isinstance(model, str) and model
+except Exception:
+    raise SystemExit("antigravity_qualification_configuration_invalid")
+
+print(model)
+PY
+)"
+
 python "$SCRIPT_DIR/../scripts/capture_cli_provenance.py" \
   --file "${AXIOM_CLI_PROVENANCE_FILE:-/dev/null}" --command agy
 
@@ -32,4 +49,4 @@ PROMPT="$(
 
 cd "$WORKTREE"
 
-agy -p "$PROMPT"
+agy --model "$MODEL" -p "$PROMPT"
