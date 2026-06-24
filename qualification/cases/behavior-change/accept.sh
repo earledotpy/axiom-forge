@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+[[ $# -eq 1 ]] || {
+  echo "usage: accept.sh <verifier-worktree>" >&2
+  exit 2
+}
+
+python - "$1" <<'PY'
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from qualification.fixture.message import message
+
+assert message() == "qualified-behavior"
+PY

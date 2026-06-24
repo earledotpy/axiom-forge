@@ -1,0 +1,6 @@
+{
+  "selected_model": "deterministic-fixture-v1",
+  "relevant_configuration": {
+    "task_protocol": "outside-scope-fixture-v1"
+  }
+}
