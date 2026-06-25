@@ -22,6 +22,11 @@ if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
   if [[ -x "$OPENCODE_DIRECT_BIN/opencode.exe" ]]; then
     export PATH="$OPENCODE_DIRECT_BIN:$PATH"
   fi
+
+  CURSOR_AGENT_DIRECT_BIN="$(cygpath -u "$USERPROFILE")/AppData/Local/cursor-agent"
+  if [[ -x "$CURSOR_AGENT_DIRECT_BIN/cursor-agent.cmd" ]]; then
+    export PATH="$CURSOR_AGENT_DIRECT_BIN:$PATH"
+  fi
 fi
 
 first_line() {
