@@ -10,6 +10,13 @@ TASK_FILE="$1"
 WORKTREE="$2"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  OPENCODE_DIRECT_BIN="$(cygpath -u "$USERPROFILE")/.opencode/bin"
+  if [[ -x "$OPENCODE_DIRECT_BIN/opencode.exe" ]]; then
+    export PATH="$OPENCODE_DIRECT_BIN:$PATH"
+  fi
+fi
+
 python "$SCRIPT_DIR/../scripts/capture_cli_provenance.py" \
   --file "${AXIOM_CLI_PROVENANCE_FILE:-/dev/null}" --command opencode
 
