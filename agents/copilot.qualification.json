@@ -1,0 +1,14 @@
+{
+  "selected_model": "GitHub Copilot CLI default",
+  "relevant_configuration": {
+    "tool_allowlist": "view,create,edit",
+    "write_permission": "write",
+    "directory_mode": "-C supplied worktree",
+    "temp_dir_access": "disabled",
+    "builtin_mcps": "disabled",
+    "remote_sessions": "disabled",
+    "remote_export": "disabled",
+    "auto_update": "disabled",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
+}

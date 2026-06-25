@@ -41,6 +41,7 @@ experimental   Usable only as a cautious experiment.
 | codex                  | `agents/codex.sh`                  | `codex`        | stable       | standard     | Proven with Codex CLI 0.137.0. Produces promoted gate branch.                                                                 |
 | claude-code            | `agents/claude-code.sh`            | `claude`       | stable       | standard     | Proven with Claude Code 2.1.170. Produces promoted gate branch.                                                               |
 | antigravity            | `agents/antigravity.sh`            | `agy`          | stable       | standard     | Qualified on `agy` 1.0.11 with model `Gemini 3.5 Flash (Low)`; see the evidence register. |
+| copilot                | `agents/copilot.sh`                | `copilot`      | experimental | experimental | Implemented from the 2026-06-25 real-task feasibility run with restricted `view,create,edit` tools; qualification still required for standard trust. |
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
@@ -72,6 +73,6 @@ configuration drift invalidates that trust until requalification succeeds.
 
 `scripts/forge_check.sh` runs `scripts/check_adapters.sh` before its test
 matrices. The `codex`, `claude`, and `agy` CLIs are required because they
-support the standard CLI adapters. CLI availability is an environment
-precondition only; it does not change adapter trust or substitute for captured
-run evidence.
+support the standard CLI adapters. `copilot` is reported as optional while its
+adapter remains experimental. CLI availability is an environment precondition
+only; it does not change adapter trust or substitute for captured run evidence.
