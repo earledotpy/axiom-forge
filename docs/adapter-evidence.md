@@ -111,6 +111,10 @@ drift invalidates that status until a new qualification series succeeds.
 
 Status: PASS
 
-- Promotion matrix: PASS, 13 passed / 0 failed
-- Runner matrix: PASS, 13 passed / 0 failed
+- Adapter CLI preflight: PASS
+- Gate contract matrix: PASS
+- Promotion matrix: PASS, 20 passed / 0 failed
+- Runner matrix: PASS, 15 passed / 0 failed
+- Qualification matrix: PASS
+- Qualification series matrix: PASS
 - Overall: `AXIOM_FORGE_CHECK: PASS`
