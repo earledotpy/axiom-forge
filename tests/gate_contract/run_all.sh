@@ -164,6 +164,22 @@ else
   fail "C7_opencode_prompt_forbids_recursive_harness_execution"
 fi
 
+
+if python - <<'PY'
+from pathlib import Path
+
+adapter = Path("agents/cursor.sh").read_text(encoding="utf-8")
+for required in (
+    "Do not run shell commands, git commands, Axiom Forge runner, qualification, promotion, or test-matrix scripts.",
+    "Do not run tests/runner/run_all.sh.",
+):
+    assert required in adapter
+PY
+then
+  pass "C8_cursor_prompt_forbids_recursive_harness_execution"
+else
+  fail "C8_cursor_prompt_forbids_recursive_harness_execution"
+fi
 if [[ "$FAIL_COUNT" -ne 0 ]]; then
   echo "GATE_CONTRACT_TEST_MATRIX: FAIL" >&2
   exit 1

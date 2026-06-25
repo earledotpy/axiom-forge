@@ -1,0 +1,14 @@
+{
+  "selected_model": "Cursor Agent default",
+  "relevant_configuration": {
+    "directory_mode": "--workspace supplied worktree",
+    "headless_mode": "--print",
+    "write_mode": "--force",
+    "output_format": "json",
+    "sandbox": "disabled because Cursor sandbox is unavailable on Windows; project permission allowlist is used",
+    "permission_config": "runtime .cursor/cli.json in supplied worktree",
+    "enabled_permissions": "Read(*), Write(*)",
+    "denied_permissions": "Shell(*), env file reads/writes, MCP tools, WebFetch(*)",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
+}

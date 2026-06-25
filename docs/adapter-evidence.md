@@ -126,6 +126,17 @@ Decision: OpenCode is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## Cursor Experimental Probe — 2026-06-25
+
+Status: EXPERIMENTAL
+
+- Adapter: cursor
+- Probe configuration: clone-local `agents/cursor.sh`; Cursor Agent `2026.06.24-00-45-58-9f61de7` at `C:\Users\jerem\AppData\Local\cursor-agent\cursor-agent.cmd`; Cursor Agent default model; `--print --force --workspace` supplied-worktree mode; `--output-format json`; `--sandbox disabled` because Cursor reports sandbox mode is unavailable on Windows; runtime `.cursor/cli.json` project permission allowlist with read/write allowed and shell, env-file access, MCP tools, and web fetch denied.
+- Probe run ID: `20260625-174716-467264` in a disposable temp clone.
+- Probe base SHA: `f7dda28725c8c500322dd7faa089687f118c7ede` in the disposable temp clone.
+- Patch SHA-256: `5b6635ee03284ef7d2a64f1a92fc34f2da72a0655eaa53bf9fb25b4af87cbb7e`.
+- Result: `scripts/run_agent_task.sh cursor tasks/change-answer.task.md` captured a completed run, `scripts/validate_run_dir.sh` passed, and `scripts/verify_patch.sh` passed in the disposable clone.
+- Caveat: this is feasibility evidence only. Cursor remains `experimental`; it has not passed the three contiguous formal qualification cases and is not a required standard adapter CLI.
 ## Final Health Check
 
 Status: PASS
