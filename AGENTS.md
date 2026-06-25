@@ -1,5 +1,19 @@
 # Axiom Forge Codex Instructions
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live in GitHub Issues; external pull requests are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The canonical triage roles use the default GitHub label vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository using the root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Project purpose
 
 Axiom Forge is a fail-closed verification and promotion gate for patches produced by CLI coding agents.
@@ -173,5 +187,4 @@ After making changes, report:
 6. Any remaining risks or follow-up work
 
 If validation was not run, explain why.
-
 
