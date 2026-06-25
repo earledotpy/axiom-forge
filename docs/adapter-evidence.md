@@ -88,6 +88,25 @@ Decision: Antigravity is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## Copilot Qualification — 2026-06-25
+
+Status: QUALIFIED
+
+- Adapter: copilot
+- Qualification configuration: `agents/copilot.sh` revision `3cb9c5c8c96924d30b87f5c62666f97c3ed2d1c0`; GitHub Copilot CLI 1.0.64 at `C:\Users\jerem\AppData\Local\Microsoft\WinGet\Packages\GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe\copilot.exe`; model `GitHub Copilot CLI default`; restricted `view,create,edit` tool allow-list with write permission, supplied-worktree directory mode, temporary directory access disabled, built-in MCPs disabled, remote sessions/export disabled, auto-update disabled, and isolated-worktree prompt protocol.
+- Base SHA: `23e54babeafbbac6504755e0dab8f2019ec98e36`
+- Result: one contiguous successful series with no resets. Raw run artifacts remain local under `runs/` and are not committed.
+
+| Case | Run ID | Task specification | Allowed-path specification | Acceptance specification | Patch SHA-256 | Scope | Acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| behavior-change | `20260625-055149-912826` | `qualification/cases/behavior-change/task.md` `2cf8c1820f825e1cca6944fa139a6127464e0dc15b707454db1e8abb8da0cb6d` | `qualification/cases/behavior-change/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/behavior-change/accept.sh` `9d423644b8ac1b624c4f67137d8d9cbbe1963f5911ec2802d908449c26988493` | `74a27b646a99450d85b90f7c1f23cb6d401524249b37ec6a1b51cd7110cf8382` | PASS | PASS |
+| new-behavior | `20260625-055217-100581` | `qualification/cases/new-behavior/task.md` `31a924690d3bf8b784c88efb6d52fe29ee5177c3c1a67b2b0c4ba3bed11f8a9d` | `qualification/cases/new-behavior/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/new-behavior/accept.sh` `94912bc05d2b7df59dfb588e1f6e9f3a454b143aa54fb796e47b8c41f36792aa` | `0c5e0284ea0fd7c19f74bd62d5a6143bca4f7331ed5b6ee152db8b2056e964fe` | PASS | PASS |
+| edge-case | `20260625-055251-256003` | `qualification/cases/edge-case/task.md` `c03f25d4e9c6b0125491b622c705f689804da55f061e10c08784fb9be27cd795` | `qualification/cases/edge-case/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/edge-case/accept.sh` `7e03a8f6361b3d31f6a9668fee9af6a08c4b1e2e19d371d0d1c77b19e71f600e` | `0df6405df60c37a71bcc0d9af1511941890e37cd002595c410eeb0de17e02bb4` | PASS | PASS |
+
+Decision: Copilot is `stable` with `standard` trust for this configuration.
+Any adapter-script, CLI-version, selected-model, or relevant-configuration
+drift invalidates that status until a new qualification series succeeds.
+
 ## Final Health Check
 
 Status: PASS
