@@ -1,0 +1,15 @@
+{
+  "selected_model": "OpenCode default",
+  "relevant_configuration": {
+    "directory_mode": "opencode run --dir supplied worktree",
+    "agent": "build",
+    "output_format": "json",
+    "plugins": "disabled with --pure",
+    "permission_config": "runtime OPENCODE_CONFIG_CONTENT override",
+    "enabled_tools": "read, glob, grep, edit, write",
+    "disabled_tools": "bash, task, webfetch, websearch, question",
+    "external_directory": "denied",
+    "dangerous_permission_bypass": "not used",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
+}
