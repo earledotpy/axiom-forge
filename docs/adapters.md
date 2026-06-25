@@ -42,7 +42,7 @@ experimental   Usable only as a cautious experiment.
 | claude-code            | `agents/claude-code.sh`            | `claude`       | stable       | standard     | Proven with Claude Code 2.1.170. Produces promoted gate branch.                                                               |
 | antigravity            | `agents/antigravity.sh`            | `agy`          | stable       | standard     | Qualified on `agy` 1.0.11 with model `Gemini 3.5 Flash (Low)`; see the evidence register. |
 | copilot                | `agents/copilot.sh`                | `copilot`      | stable       | standard     | Qualified on GitHub Copilot CLI 1.0.64 with restricted `view,create,edit` tools; see the evidence register. |
-| opencode               | `agents/opencode.sh`               | `opencode`     | experimental | experimental | One isolated real-task probe passed on OpenCode 1.17.10 with a restrictive runtime permission override; not yet qualified. |
+| opencode               | `agents/opencode.sh`               | `opencode`     | stable       | standard     | Qualified on OpenCode 1.17.10 with a restrictive runtime permission override; see the evidence register. |
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
@@ -65,17 +65,16 @@ their existing `standard` status under the grandfathered decision.
 
 ## Current Decision
 
-`manual-simulated-agent`, `codex`, `claude-code`, `antigravity`, and `copilot`
-are standard adapters. `opencode` is experimental and must not be treated as a
-standard adapter until a contiguous qualification series succeeds. Antigravity
-and Copilot standard trust applies only to their recorded qualification
-configurations; adapter-script, CLI-version, model, or relevant configuration
-drift invalidates that trust until requalification succeeds.
+`manual-simulated-agent`, `codex`, `claude-code`, `antigravity`, `copilot`, and
+`opencode` are standard adapters. Antigravity, Copilot, and OpenCode standard
+trust applies only to their recorded qualification configurations;
+adapter-script, CLI-version, model, or relevant configuration drift invalidates
+that trust until requalification succeeds.
 
 ## Health-Proof CLI Preflight
 
 `scripts/forge_check.sh` runs `scripts/check_adapters.sh` before its test
-matrices. The `codex`, `claude`, `agy`, and `copilot` CLIs are required because
-they support standard CLI adapters. CLI availability is an environment
-precondition only; it does not change adapter trust or substitute for captured
-run evidence. `opencode` remains optional while the adapter is experimental.
+matrices. The `codex`, `claude`, `agy`, `copilot`, and `opencode` CLIs are
+required because they support standard CLI adapters. CLI availability is an
+environment precondition only; it does not change adapter trust or substitute
+for captured run evidence.

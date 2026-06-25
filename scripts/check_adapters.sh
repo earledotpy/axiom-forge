@@ -17,6 +17,13 @@ if [[ -z "$ROOT" ]]; then
 fi
 cd "$ROOT"
 
+if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+  OPENCODE_DIRECT_BIN="$(cygpath -u "$USERPROFILE")/.opencode/bin"
+  if [[ -x "$OPENCODE_DIRECT_BIN/opencode.exe" ]]; then
+    export PATH="$OPENCODE_DIRECT_BIN:$PATH"
+  fi
+fi
+
 first_line() {
   tr -d '\r' | sed -n '1p'
 }
@@ -84,7 +91,7 @@ report_cli_adapter "codex" "codex" "required" || required_cli_missing=1
 report_cli_adapter "claude-code" "claude" "required" || required_cli_missing=1
 report_cli_adapter "antigravity" "agy" "required"
 report_cli_adapter "copilot" "copilot" "required" || required_cli_missing=1
-report_cli_adapter "opencode" "opencode" "optional"
+report_cli_adapter "opencode" "opencode" "required" || required_cli_missing=1
 
 if [[ "$required_cli_missing" -ne 0 ]]; then
   echo
