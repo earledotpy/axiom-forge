@@ -245,6 +245,30 @@ Decision: QoderCLI is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## Cline Marker Probe — 2026-06-26
+
+Status: PASS_EXPERIMENTAL
+
+- Candidate: cline
+- Probe scope: disposable marker-file probe only; not a captured Axiom Forge
+  run and not a standard-adapter qualification series.
+- Probe directory:
+  `C:\Users\jerem\AppData\Local\Temp\axiom-forge-cline-marker-51d587c6-06e3-4999-90a9-801a9ccc49f0`
+- CLI observation: local npm package `cline` version `3.0.30`; Git Bash can
+  resolve `cline` after prepending `/c/Users/jerem/.npm-global` to `PATH`.
+- Result: `cline --cwd <probe-dir> --json --auto-approve true --timeout 180`
+  with an attempted `CLINE_COMMAND_PERMISSIONS` shell-command denial setting
+  created only `marker.txt` with exact content `READY`; this marker probe did
+  not prove the denial setting.
+- Follow-up runner probe: temp-clone runs `20260626-075441-547304` and
+  `20260626-080058-331527` both failed with `agent_execution_failed`. The
+  second log showed Cline invoking `run_commands` despite the adapter setting
+  `CLINE_COMMAND_PERMISSIONS` to deny all shell commands.
+- Decision: Cline is `blocked` for adapter registration. Do not add a runnable
+  adapter until current first-party evidence or a new controlled probe proves
+  shell-command denial and clean task completion under the Axiom Forge adapter
+  contract.
+
 ## Final Health Check
 
 Status: PASS
