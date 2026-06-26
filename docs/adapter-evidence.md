@@ -145,6 +145,19 @@ Decision: Cursor is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## Kiro Feasibility Probe — 2026-06-26
+
+Status: PASS_EXPERIMENTAL
+
+- Adapter: kiro
+- Probe scope: temp-clone real-task probe only; not a standard-adapter qualification series.
+- Probe run ID: `20260626-065258-212079`
+- Probe base SHA: `e2f3940c3508e83d5643d3f2f71e114052fc8328` in temp clone `C:\Users\jerem\AppData\Local\Temp\axiom-forge-kiro-probe-clone-dfe4e245-b531-40d8-99e2-e20c4103b053`
+- CLI provenance: `kiro-cli.exe`; `C:\Users\jerem\AppData\Local\Kiro-Cli\kiro-cli.exe`; `kiro-cli-chat 2.10.0`
+- Result: `scripts/run_agent_task.sh kiro tasks/change-answer.task.md` completed, `scripts/validate_run_dir.sh` accepted the run directory, and `scripts/verify_patch.sh` passed from a disposable verifier worktree.
+- Diff summary: `app/target.py` changed `return "base"` to `return "runner-promoted"`.
+- Decision: Kiro remains `experimental` with `experimental` trust. Standard trust requires a clean contiguous three-case qualification series and a separate docs/status update.
+
 ## Final Health Check
 
 Status: PASS

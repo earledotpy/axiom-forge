@@ -71,6 +71,7 @@ assert 'report_cli_adapter "antigravity" "agy" "required"' in adapter_check
 assert 'report_cli_adapter "copilot" "copilot" "required"' in adapter_check
 assert 'report_cli_adapter "opencode" "opencode" "required"' in adapter_check
 assert 'report_cli_adapter "cursor" "cursor-agent.cmd" "required"' in adapter_check
+assert 'report_cli_adapter "kiro" "kiro-cli.exe" "optional"' in adapter_check
 assert "required standard adapter CLI unavailable" in adapter_check
 PY
 then
@@ -180,6 +181,24 @@ then
   pass "C8_cursor_prompt_forbids_recursive_harness_execution"
 else
   fail "C8_cursor_prompt_forbids_recursive_harness_execution"
+fi
+
+if python - <<'PY'
+from pathlib import Path
+
+adapter = Path("agents/kiro.sh").read_text(encoding="utf-8")
+for required in (
+    "Do not run shell commands, git commands, Axiom Forge runner, qualification, promotion, or test-matrix scripts.",
+    "Do not run tests/runner/run_all.sh.",
+):
+    assert required in adapter
+assert "--trust-all-tools" not in adapter
+assert "--trust-tools=read,write" in adapter
+PY
+then
+  pass "C9_kiro_prompt_forbids_recursive_harness_execution"
+else
+  fail "C9_kiro_prompt_forbids_recursive_harness_execution"
 fi
 if [[ "$FAIL_COUNT" -ne 0 ]]; then
   echo "GATE_CONTRACT_TEST_MATRIX: FAIL" >&2

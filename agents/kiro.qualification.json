@@ -1,0 +1,11 @@
+{
+  "selected_model": "Kiro CLI default",
+  "relevant_configuration": {
+    "directory_mode": "adapter changes directory to supplied worktree before invoking kiro-cli.exe chat",
+    "headless_mode": "chat --no-interactive",
+    "trusted_tools": "read, write",
+    "dangerous_tool_bypass": "not used; --trust-all-tools is not used",
+    "task_delivery": "task copied into supplied worktree at .kiro/axiom-task.md; prompt instructs Kiro to read that file",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
+}

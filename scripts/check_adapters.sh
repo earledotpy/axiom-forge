@@ -27,6 +27,11 @@ if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
   if [[ -x "$CURSOR_AGENT_DIRECT_BIN/cursor-agent.cmd" ]]; then
     export PATH="$CURSOR_AGENT_DIRECT_BIN:$PATH"
   fi
+
+  KIRO_DIRECT_BIN="$(cygpath -u "$USERPROFILE")/AppData/Local/Kiro-Cli"
+  if [[ -x "$KIRO_DIRECT_BIN/kiro-cli.exe" ]]; then
+    export PATH="$KIRO_DIRECT_BIN:$PATH"
+  fi
 fi
 
 first_line() {
@@ -98,6 +103,7 @@ report_cli_adapter "antigravity" "agy" "required"
 report_cli_adapter "copilot" "copilot" "required" || required_cli_missing=1
 report_cli_adapter "opencode" "opencode" "required" || required_cli_missing=1
 report_cli_adapter "cursor" "cursor-agent.cmd" "required" || required_cli_missing=1
+report_cli_adapter "kiro" "kiro-cli.exe" "optional" || required_cli_missing=1
 
 if [[ "$required_cli_missing" -ne 0 ]]; then
   echo
