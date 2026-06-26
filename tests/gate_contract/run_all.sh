@@ -70,6 +70,7 @@ assert 'report_cli_adapter "claude-code" "claude" "required"' in adapter_check
 assert 'report_cli_adapter "antigravity" "agy" "required"' in adapter_check
 assert 'report_cli_adapter "copilot" "copilot" "required"' in adapter_check
 assert 'report_cli_adapter "opencode" "opencode" "required"' in adapter_check
+assert 'report_cli_adapter "cursor" "cursor-agent.cmd" "required"' in adapter_check
 assert "required standard adapter CLI unavailable" in adapter_check
 PY
 then

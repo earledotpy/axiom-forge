@@ -97,7 +97,7 @@ report_cli_adapter "claude-code" "claude" "required" || required_cli_missing=1
 report_cli_adapter "antigravity" "agy" "required"
 report_cli_adapter "copilot" "copilot" "required" || required_cli_missing=1
 report_cli_adapter "opencode" "opencode" "required" || required_cli_missing=1
-report_cli_adapter "cursor" "cursor-agent.cmd" "optional"
+report_cli_adapter "cursor" "cursor-agent.cmd" "required" || required_cli_missing=1
 
 if [[ "$required_cli_missing" -ne 0 ]]; then
   echo

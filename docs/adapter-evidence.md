@@ -126,17 +126,24 @@ Decision: OpenCode is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
-## Cursor Experimental Probe — 2026-06-25
+## Cursor Qualification — 2026-06-25
 
-Status: EXPERIMENTAL
+Status: QUALIFIED
 
 - Adapter: cursor
-- Probe configuration: checked-in `agents/cursor.sh`; Cursor Agent `2026.06.24-00-45-58-9f61de7` at `C:\Users\jerem\AppData\Local\cursor-agent\cursor-agent.cmd`; Cursor Agent default model; `--print --force --workspace` supplied-worktree mode; `--output-format json`; `--sandbox disabled` because Cursor reports sandbox mode is unavailable on Windows; runtime `.cursor/cli.json` project permission allowlist with read/write allowed and shell, env-file access, MCP tools, and web fetch denied.
-- Probe run ID: `20260625-175217-436244`.
-- Probe base SHA: `9c2d88fe3c0363ca5a4a5aa6493a77a38b3dac49`.
-- Patch SHA-256: `5b6635ee03284ef7d2a64f1a92fc34f2da72a0655eaa53bf9fb25b4af87cbb7e`.
-- Result: `scripts/run_agent_task.sh cursor tasks/change-answer.task.md` captured a completed run from a clean checkout, `scripts/validate_run_dir.sh` passed, and `scripts/verify_patch.sh` passed.
-- Caveat: this is feasibility evidence only. Cursor remains `experimental`; it has not passed the three contiguous formal qualification cases and is not a required standard adapter CLI.
+- Qualification configuration: `agents/cursor.sh` revision `864192a924cf573680157a4b3b8e216acf72a6a2`; Cursor Agent `2026.06.24-00-45-58-9f61de7` at `C:\Users\jerem\AppData\Local\cursor-agent\cursor-agent.cmd`; model `Cursor Agent default`; `--print --force --workspace` supplied-worktree mode; JSON output; `--sandbox disabled` because Cursor reports sandbox mode is unavailable on Windows; runtime `.cursor/cli.json` project permission allowlist, read/write enabled, shell/env-file/MCP/web fetch access denied, and isolated-worktree prompt protocol.
+- Base SHA: `62c7e6847f587c6d892e25ca0fa6cd3a20ae6d9b`
+- Result: one contiguous successful series with no resets after the prompt-delivery fix commit. Raw run artifacts remain local under `runs/` and are not committed.
+
+| Case | Run ID | Task specification | Allowed-path specification | Acceptance specification | Patch SHA-256 | Scope | Acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| behavior-change | `20260626-041535-846879` | `qualification/cases/behavior-change/task.md` `2cf8c1820f825e1cca6944fa139a6127464e0dc15b707454db1e8abb8da0cb6d` | `qualification/cases/behavior-change/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/behavior-change/accept.sh` `9d423644b8ac1b624c4f67137d8d9cbbe1963f5911ec2802d908449c26988493` | `74a27b646a99450d85b90f7c1f23cb6d401524249b37ec6a1b51cd7110cf8382` | PASS | PASS |
+| new-behavior | `20260626-041616-399402` | `qualification/cases/new-behavior/task.md` `31a924690d3bf8b784c88efb6d52fe29ee5177c3c1a67b2b0c4ba3bed11f8a9d` | `qualification/cases/new-behavior/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/new-behavior/accept.sh` `94912bc05d2b7df59dfb588e1f6e9f3a454b143aa54fb796e47b8c41f36792aa` | `10c89412b94ede7a7aa7d459040f62f0cc140d5eea7813aea0a3d536cd033461` | PASS | PASS |
+| edge-case | `20260626-041658-791972` | `qualification/cases/edge-case/task.md` `c03f25d4e9c6b0125491b622c705f689804da55f061e10c08784fb9be27cd795` | `qualification/cases/edge-case/allowed-paths.txt` `13c75990a8144aaf76db6ed595dd58bab3ffb155ec88e870e3ea8399f9550ec1` | `qualification/cases/edge-case/accept.sh` `7e03a8f6361b3d31f6a9668fee9af6a08c4b1e2e19d371d0d1c77b19e71f600e` | `704219299e7d21fe2f0aad73055bca0f9b3bc631586af73b310357e983513994` | PASS | PASS |
+
+Decision: Cursor is `stable` with `standard` trust for this configuration.
+Any adapter-script, CLI-version, selected-model, or relevant-configuration
+drift invalidates that status until a new qualification series succeeds.
 
 ## Final Health Check
 
