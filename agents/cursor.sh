@@ -40,27 +40,10 @@ cat > "$WORKTREE/.cursor/cli.json" <<'JSON'
 }
 JSON
 
-PROMPT="$(
-  {
-    echo "You are running inside this isolated disposable git worktree:"
-    echo "$WORKTREE"
-    echo
-    echo "Implement the task between the TASK markers below by editing tracked task files in that worktree only."
-    echo "Do not commit."
-    echo "Do not create branches."
-    echo "Do not modify files outside this worktree."
-    echo "Do not run shell commands, git commands, Axiom Forge runner, qualification, promotion, or test-matrix scripts."
-    echo "Do not run tests/runner/run_all.sh."
-    echo "Do not run scripts/run_agent_task.sh, scripts/qualify_adapter.sh, scripts/promote.sh, scripts/forge_check.sh, or tests/*/run_all.sh."
-    echo "Do not create nested worktrees or invoke agents/bad-*.sh."
-    echo
-    echo "After editing, stop. Do not wait for further instruction."
-    echo
-    echo "TASK BEGINS"
-    cat "$TASK_FILE"
-    echo "TASK ENDS"
-  }
-)"
+TASK_COPY="$WORKTREE/.cursor/axiom-task.md"
+cp "$TASK_FILE" "$TASK_COPY"
+
+PROMPT="You are running inside this isolated disposable git worktree: $WORKTREE. Read the task file at $TASK_COPY and implement it by editing tracked task files in that worktree only. Do not commit. Do not create branches. Do not modify files outside this worktree. Do not run shell commands, git commands, Axiom Forge runner, qualification, promotion, or test-matrix scripts. Do not run tests/runner/run_all.sh. Do not run scripts/run_agent_task.sh, scripts/qualify_adapter.sh, scripts/promote.sh, scripts/forge_check.sh, or tests/*/run_all.sh. Do not create nested worktrees or invoke agents/bad-*.sh. After editing, stop. Do not wait for further instruction."
 
 cursor-agent.cmd \
   --print \
