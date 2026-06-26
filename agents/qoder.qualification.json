@@ -1,0 +1,14 @@
+{
+  "selected_model": "QoderCLI default",
+  "relevant_configuration": {
+    "directory_mode": "--cwd supplied worktree",
+    "headless_mode": "--print",
+    "permission_mode": "accept_edits",
+    "enabled_tools": "Read, Write, Edit, Grep, Glob",
+    "denied_tools": "Bash, WebFetch, WebSearch, Agent, Mcp, AskUserQuestion",
+    "dangerous_permission_bypass": "not used; --dangerously-skip-permissions is not used",
+    "remote_modes": "not used; --remote, --remote-control, --remote-session, and --teleport are not used",
+    "task_delivery": "task copied into supplied worktree at .qoder/axiom-task.md; prompt instructs QoderCLI to read that file",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
+}

@@ -177,6 +177,45 @@ Decision: Kiro is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## QoderCLI Marker Probe — 2026-06-26
+
+Status: PASS_EXPERIMENTAL
+
+- Adapter: qoder
+- Probe scope: disposable marker-file probe only; not a captured Axiom Forge
+  run and not a standard-adapter qualification series.
+- Probe directory: `C:\Users\jerem\AppData\Local\Temp\axiom-forge-qodercli-marker-04dad0ac-cb5e-4dfc-8a51-9bd9b024b449`
+- CLI observation: `qodercli-1.0.30.exe --version` reported `1.0.30`; Git
+  Bash can resolve `qodercli-1.0.30.exe` after prepending
+  `/c/Users/jerem/.qoder/bin/qodercli` to `PATH`.
+- Result: `qodercli-1.0.30.exe -p --cwd <probe-dir> --permission-mode
+  accept_edits` with restricted `Read`, `Write`, `Edit`, `Grep`, and `Glob`
+  tools created `marker.txt` with exact content `READY`.
+- Decision: QoderCLI remains `experimental` with `experimental` trust.
+  Standard trust requires a clean contiguous three-case qualification series
+  and a separate docs/status update.
+
+## QoderCLI Feasibility Probe — 2026-06-26
+
+Status: PASS_EXPERIMENTAL
+
+- Adapter: qoder
+- Probe scope: temp-clone real-task probe only; not a standard-adapter
+  qualification series.
+- Probe run ID: `20260626-072029-621627`
+- Probe base SHA: `48c4ae0f8276994d45023c25cfcf965433492099` in temp clone
+  `C:\Users\jerem\AppData\Local\Temp\axiom-forge-qodercli-probe-clone-afbabdc8-557a-41de-9eb6-6b605e106421`
+- CLI provenance: `qodercli-1.0.30.exe`;
+  `C:\Users\jerem\.qoder\bin\qodercli\qodercli-1.0.30.exe`; `1.0.30`
+- Result: `scripts/run_agent_task.sh qoder tasks/change-answer.task.md`
+  completed, `scripts/validate_run_dir.sh` accepted the run directory, and
+  `scripts/verify_patch.sh` passed from a disposable verifier worktree.
+- Diff summary: `app/target.py` changed `return "base"` to
+  `return "runner-promoted"`.
+- Decision: QoderCLI remains `experimental` with `experimental` trust.
+  Standard trust requires a clean contiguous three-case qualification series
+  and a separate docs/status update.
+
 ## Final Health Check
 
 Status: PASS
