@@ -149,7 +149,8 @@ drift invalidates that status until a new qualification series succeeds.
 
 Status: PASS
 
-- Adapter CLI preflight: PASS
+- Adapter CLI preflight: PASS, including required `cursor-agent.cmd`
+- Health proof commit: `398d2ff` (`AXIOM_FORGE_CHECK: PASS` after Cursor standard promotion)
 - Gate contract matrix: PASS
 - Promotion matrix: PASS, 20 passed / 0 failed
 - Runner matrix: PASS, 15 passed / 0 failed
