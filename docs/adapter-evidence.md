@@ -216,12 +216,42 @@ Status: PASS_EXPERIMENTAL
   Standard trust requires a clean contiguous three-case qualification series
   and a separate docs/status update.
 
+## QoderCLI Qualification — 2026-06-26
+
+Status: QUALIFIED
+
+- Adapter: qoder
+- Qualification configuration: `agents/qoder.sh` revision
+  `00d55293770be7ece9505f17e50cf3797662cbfa`; QoderCLI `1.0.30` at
+  `C:\Users\jerem\.qoder\bin\qodercli\qodercli-1.0.30.exe`; model
+  `QoderCLI default`; `qodercli-1.0.30.exe --print --cwd <supplied-worktree>
+  --permission-mode accept_edits`; restricted `Read`, `Write`, `Edit`, `Grep`,
+  and `Glob` tools; denied shell, web, agent, MCP, and question tools; empty
+  strict MCP config; no dangerous permission bypass, remote mode, worktree
+  creation, or extra directory; task copied into `.qoder/axiom-task.md`; and
+  isolated-worktree prompt protocol.
+- Base SHA: `71f6d8e3dd3c2648570ab95deee843c33570bcbb`
+- Result: one contiguous successful series with no resets. Raw run artifacts
+  remain local under the clean temp clone's `runs/` directory and are not
+  committed.
+
+| Case | Run ID | Task specification | Allowed-path specification | Acceptance specification | Patch SHA-256 | Scope | Acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| behavior-change | `20260626-072456-126451` | `qualification/cases/behavior-change/task.md` `70c15be43693ef7fee09f26582d4cd4bf5a9dc14d9fe2a1dfd5c02117d9362ac` | `qualification/cases/behavior-change/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/behavior-change/accept.sh` `f034e780220a979e8b8a05c42df47bb67c0b002f60eaae343c997860b3ab1462` | `74a27b646a99450d85b90f7c1f23cb6d401524249b37ec6a1b51cd7110cf8382` | PASS | PASS |
+| new-behavior | `20260626-072529-871366` | `qualification/cases/new-behavior/task.md` `3f539a7903a0d1fa299094847c841ae07ac6dfe2c0bddee7fde471a2fc09cdee` | `qualification/cases/new-behavior/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/new-behavior/accept.sh` `afbb786392cb439deaf38891ec40b698cc03deb97acd65f9a4e68e3c2ecf6d1d` | `10c89412b94ede7a7aa7d459040f62f0cc140d5eea7813aea0a3d536cd033461` | PASS | PASS |
+| edge-case | `20260626-072605-561112` | `qualification/cases/edge-case/task.md` `26ff542ee38f29deb3baa853dd9f23ee3497bb5980a60d472d5c9cc395eedfe5` | `qualification/cases/edge-case/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/edge-case/accept.sh` `68088ba7274de1808ab4991925d71d6aa0cefb4525674f9bba9327fa8d9be540` | `ef4413d1ecb6823641eb8fdb293920d144b0ab63b42a1475d0ea8f9df496dbfb` | PASS | PASS |
+
+Decision: QoderCLI is `stable` with `standard` trust for this configuration.
+Any adapter-script, CLI-version, selected-model, or relevant-configuration
+drift invalidates that status until a new qualification series succeeds.
+
 ## Final Health Check
 
 Status: PASS
 
-- Adapter CLI preflight: PASS, including required `cursor-agent.cmd` and `kiro-cli.exe`
-- Final clean-clone proof: `AXIOM_FORGE_CHECK: PASS` after Kiro standard promotion
+- Adapter CLI preflight: PASS, including required `cursor-agent.cmd`,
+  `kiro-cli.exe`, and `qodercli-1.0.30.exe`
+- Final clean-clone proof: `AXIOM_FORGE_CHECK: PASS` after QoderCLI standard promotion
 - Gate contract matrix: PASS
 - Promotion matrix: PASS, 20 passed / 0 failed
 - Runner matrix: PASS, 15 passed / 0 failed

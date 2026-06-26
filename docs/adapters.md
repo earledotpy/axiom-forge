@@ -45,7 +45,7 @@ experimental   Usable only as a cautious experiment.
 | opencode               | `agents/opencode.sh`               | `opencode`     | stable       | standard     | Qualified on OpenCode 1.17.10 with a restrictive runtime permission override; see the evidence register. |
 | cursor                 | `agents/cursor.sh`                 | `cursor-agent.cmd` | stable       | standard     | Qualified on Cursor Agent 2026.06.24 with headless workspace mode and runtime permission allowlists; see the evidence register. |
 | kiro                   | `agents/kiro.sh`                   | `kiro-cli.exe` | stable       | standard     | Qualified on Kiro CLI 2.10.0 with non-interactive chat and restricted read/write trusted tools; see the evidence register. |
-| qoder                  | `agents/qoder.sh`                  | `qodercli-1.0.30.exe` | experimental | experimental | Temp-clone real-task probe passed with non-interactive mode and restricted tools; standard trust requires qualification. |
+| qoder                  | `agents/qoder.sh`                  | `qodercli-1.0.30.exe` | stable       | standard     | Qualified on QoderCLI 1.0.30 with non-interactive mode and restricted read/write/edit/search tools; see the evidence register. |
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
 | bad-empty-agent        | `agents/bad-empty-agent.sh`        | Bash           | stable       | test-only    | Intentionally produces no patch.                                                                                              |
@@ -69,8 +69,8 @@ their existing `standard` status under the grandfathered decision.
 ## Current Decision
 
 `manual-simulated-agent`, `codex`, `claude-code`, `antigravity`, `copilot`,
-`opencode`, `cursor`, and `kiro` are standard adapters. Antigravity, Copilot,
-OpenCode, Cursor, and Kiro standard trust applies only to their recorded qualification
+`opencode`, `cursor`, `kiro`, and `qoder` are standard adapters. Antigravity,
+Copilot, OpenCode, Cursor, Kiro, and Qoder standard trust applies only to their recorded qualification
 configurations;
 adapter-script, CLI-version, model, or relevant configuration drift invalidates
 that trust until requalification succeeds.
@@ -79,7 +79,7 @@ that trust until requalification succeeds.
 
 `scripts/forge_check.sh` runs `scripts/check_adapters.sh` before its test
 matrices. The `codex`, `claude`, `agy`, `copilot`, `opencode`,
-`cursor-agent.cmd`, and `kiro-cli.exe` CLIs are required because they support
+`cursor-agent.cmd`, `kiro-cli.exe`, and `qodercli-1.0.30.exe` CLIs are required because they support
 standard CLI adapters. CLI availability is an
 environment precondition only; it does not change adapter trust or substitute
 for captured run evidence.
