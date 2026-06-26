@@ -158,12 +158,31 @@ Status: PASS_EXPERIMENTAL
 - Diff summary: `app/target.py` changed `return "base"` to `return "runner-promoted"`.
 - Decision: Kiro remains `experimental` with `experimental` trust. Standard trust requires a clean contiguous three-case qualification series and a separate docs/status update.
 
+## Kiro Qualification — 2026-06-26
+
+Status: QUALIFIED
+
+- Adapter: kiro
+- Qualification configuration: `agents/kiro.sh` revision `3cbedf56b483472cc77ceccec848c6c8d19efc8f`; Kiro CLI `kiro-cli-chat 2.10.0` at `C:\Users\jerem\AppData\Local\Kiro-Cli\kiro-cli.exe`; model `Kiro CLI default`; `kiro-cli.exe chat --no-interactive` from the supplied worktree, `--trust-tools=read,write`, no `--trust-all-tools`, task copied into `.kiro/axiom-task.md`, and isolated-worktree prompt protocol.
+- Base SHA: `361b86544b9e28cba5a43136bf81147d95a5914d`
+- Result: one contiguous successful series with no resets. Raw run artifacts remain local under the clean temp clone's `runs/` directory and are not committed.
+
+| Case | Run ID | Task specification | Allowed-path specification | Acceptance specification | Patch SHA-256 | Scope | Acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| behavior-change | `20260626-065713-161584` | `qualification/cases/behavior-change/task.md` `70c15be43693ef7fee09f26582d4cd4bf5a9dc14d9fe2a1dfd5c02117d9362ac` | `qualification/cases/behavior-change/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/behavior-change/accept.sh` `f034e780220a979e8b8a05c42df47bb67c0b002f60eaae343c997860b3ab1462` | `74a27b646a99450d85b90f7c1f23cb6d401524249b37ec6a1b51cd7110cf8382` | PASS | PASS |
+| new-behavior | `20260626-065737-694509` | `qualification/cases/new-behavior/task.md` `3f539a7903a0d1fa299094847c841ae07ac6dfe2c0bddee7fde471a2fc09cdee` | `qualification/cases/new-behavior/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/new-behavior/accept.sh` `afbb786392cb439deaf38891ec40b698cc03deb97acd65f9a4e68e3c2ecf6d1d` | `acea5d0c4f0d02ee9c58f985d3d5f4ba97ce1a50e4663cf11bafcf178d6a0148` | PASS | PASS |
+| edge-case | `20260626-065804-591313` | `qualification/cases/edge-case/task.md` `26ff542ee38f29deb3baa853dd9f23ee3497bb5980a60d472d5c9cc395eedfe5` | `qualification/cases/edge-case/allowed-paths.txt` `d92c733e99997fa547562ff5118c5233af8b0a8234bb021bb0999b147dd4001e` | `qualification/cases/edge-case/accept.sh` `68088ba7274de1808ab4991925d71d6aa0cefb4525674f9bba9327fa8d9be540` | `e2b212d8191271af7d274b98bbfb80a05783c5478f054f02f07940b44e6cd125` | PASS | PASS |
+
+Decision: Kiro is `stable` with `standard` trust for this configuration.
+Any adapter-script, CLI-version, selected-model, or relevant-configuration
+drift invalidates that status until a new qualification series succeeds.
+
 ## Final Health Check
 
 Status: PASS
 
-- Adapter CLI preflight: PASS, including required `cursor-agent.cmd`
-- Health proof commit: `398d2ff` (`AXIOM_FORGE_CHECK: PASS` after Cursor standard promotion)
+- Adapter CLI preflight: PASS, including required `cursor-agent.cmd` and `kiro-cli.exe`
+- Final clean-clone proof: `AXIOM_FORGE_CHECK: PASS` after Kiro standard promotion
 - Gate contract matrix: PASS
 - Promotion matrix: PASS, 20 passed / 0 failed
 - Runner matrix: PASS, 15 passed / 0 failed
