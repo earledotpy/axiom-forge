@@ -340,8 +340,8 @@ Status: PASS_EXPERIMENTAL
 Status: PASS
 
 - Adapter CLI preflight: PASS, including required `cursor-agent.cmd`,
-  `kiro-cli.exe`, and `qodercli-1.0.30.exe`
-- Final clean-clone proof: `AXIOM_FORGE_CHECK: PASS` after QoderCLI standard promotion
+  `kiro-cli.exe`, `qodercli-1.0.30.exe`, and `kilo`
+- Final clean-clone proof: `AXIOM_FORGE_CHECK: PASS` after Kilo standard promotion
 - Gate contract matrix: PASS
 - Promotion matrix: PASS, 20 passed / 0 failed
 - Runner matrix: PASS, 15 passed / 0 failed
