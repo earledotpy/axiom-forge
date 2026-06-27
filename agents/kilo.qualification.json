@@ -1,0 +1,6 @@
+{
+  "adapter": "kilo",
+  "cli_command": "kilo",
+  "model": "Kilo default",
+  "boundary": "kilo run --dir <supplied-worktree> with project-local primary agent, read/edit/write/glob/grep allowed, shell/web/task/skill/lsp/external-directory tools denied, pure mode, JSON output, and no dangerous permission bypass"
+}

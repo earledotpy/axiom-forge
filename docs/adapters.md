@@ -46,6 +46,7 @@ experimental   Usable only as a cautious experiment.
 | cursor                 | `agents/cursor.sh`                 | `cursor-agent.cmd` | stable       | standard     | Qualified on Cursor Agent 2026.06.24 with headless workspace mode and runtime permission allowlists; see the evidence register. |
 | kiro                   | `agents/kiro.sh`                   | `kiro-cli.exe` | stable       | standard     | Qualified on Kiro CLI 2.10.0 with non-interactive chat and restricted read/write trusted tools; see the evidence register. |
 | qoder                  | `agents/qoder.sh`                  | `qodercli-1.0.30.exe` | stable       | standard     | Qualified on QoderCLI 1.0.30 with non-interactive mode and restricted read/write/edit/search tools; see the evidence register. |
+| kilo                   | `agents/kilo.sh`                   | `kilo`         | experimental | experimental | Marker, shell-denial, and temp-clone runner probes passed on Kilo CLI 7.3.54; standard trust requires contiguous qualification. |
 | cline                  | Not registered                     | `cline`        | blocked      | experimental | Marker-file probe passed on Cline CLI 3.0.30, but runner probes failed and shell-command denial did not hold; no adapter is registered. |
 | bad-commit-agent       | `agents/bad-commit-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by committing.                                                                        |
 | bad-branch-agent       | `agents/bad-branch-agent.sh`       | Git            | stable       | test-only    | Intentionally violates adapter contract by switching branches.                                                                |
@@ -71,8 +72,9 @@ their existing `standard` status under the grandfathered decision.
 
 `manual-simulated-agent`, `codex`, `claude-code`, `antigravity`, `copilot`,
 `opencode`, `cursor`, `kiro`, and `qoder` are standard adapters. `cline` is
-blocked and has no registered adapter script. Antigravity,
-Copilot, OpenCode, Cursor, Kiro, and Qoder standard trust applies only to their recorded qualification
+blocked and has no registered adapter script. `kilo` is experimental only and
+is not a standard adapter until the documented qualification series succeeds.
+Antigravity, Copilot, OpenCode, Cursor, Kiro, and Qoder standard trust applies only to their recorded qualification
 configurations;
 adapter-script, CLI-version, model, or relevant configuration drift invalidates
 that trust until requalification succeeds.

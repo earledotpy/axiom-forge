@@ -245,6 +245,43 @@ Decision: QoderCLI is `stable` with `standard` trust for this configuration.
 Any adapter-script, CLI-version, selected-model, or relevant-configuration
 drift invalidates that status until a new qualification series succeeds.
 
+## Kilo Marker and Feasibility Probes — 2026-06-27
+
+Status: PASS_EXPERIMENTAL
+
+- Adapter: kilo
+- Probe scope: disposable marker-file probe, shell-denial probe, and
+  temp-clone real-task probe only; not a standard-adapter qualification series.
+- Marker probe directory:
+  `C:\Users\jerem\AppData\Local\Temp\axiom-forge-kilo-marker-b84ab941-b78f-47e0-92c9-879401d5f0b7`
+- Shell-denial probe directory:
+  `C:\Users\jerem\AppData\Local\Temp\axiom-forge-kilo-shell-denial-d2acddef-cde3-4471-9b28-424774fd027e`
+- CLI observation: local npm package `@kilocode/cli@7.3.54`; PowerShell and
+  Git Bash can resolve `kilo` and `kilocode` under
+  `C:\Users\jerem\.npm-global`; `kilo --version` reported `7.3.54`.
+- Boundary tested: `kilo run --dir <probe-dir> --agent axiom-forge-probe
+  --format json --pure --auto` with a project-local primary agent allowing
+  read, edit, write, glob, and grep while denying bash, web fetch/search,
+  task/subagent, skill, LSP, and external-directory tools. The dangerous
+  `--dangerously-skip-permissions` flag was not used.
+- Marker result: Kilo created only `marker.txt` with exact content `READY`
+  plus its project-local `.kilo/` support files.
+- Shell-denial result: when asked to create `shell-created.txt` with a shell
+  command, Kilo reported no shell/bash/terminal command tool was available and
+  `shell-created.txt` was not created.
+- Temp-clone probe run ID: `20260627-155820-915057`
+- Probe base SHA: `f1a7ce3326b5785b49ccaa5ae9a01e4673c6b184` in temp clone
+  `C:\Users\jerem\AppData\Local\Temp\axiom-forge-kilo-probe-clone-eb69b2b5-8fba-45b4-b14f-87ddc17b3e7d`
+- CLI provenance: `kilo`; `C:\Users\jerem\.npm-global\kilo.cmd`; `7.3.54`
+- Result: `scripts/run_agent_task.sh kilo tasks/change-answer.task.md`
+  completed, `scripts/validate_run_dir.sh` accepted the run directory, and
+  `scripts/verify_patch.sh` passed from a disposable verifier worktree.
+- Diff summary: `app/target.py` changed `return "base"` to
+  `return "runner-promoted"`.
+- Decision: Kilo remains `experimental` with `experimental` trust. Standard
+  trust requires a clean contiguous three-case qualification series and a
+  separate docs/status update.
+
 ## Cline Marker Probe — 2026-06-26
 
 Status: PASS_EXPERIMENTAL
