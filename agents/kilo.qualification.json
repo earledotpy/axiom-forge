@@ -1,6 +1,16 @@
 {
-  "adapter": "kilo",
-  "cli_command": "kilo",
-  "model": "Kilo default",
-  "boundary": "kilo run --dir <supplied-worktree> with project-local primary agent, read/edit/write/glob/grep allowed, shell/web/task/skill/lsp/external-directory tools denied, pure mode, JSON output, and no dangerous permission bypass"
+  "selected_model": "Kilo default",
+  "relevant_configuration": {
+    "directory_mode": "--dir supplied worktree",
+    "headless_mode": "run with non-interactive message argument",
+    "output_format": "--format json",
+    "plugin_mode": "--pure",
+    "approval_mode": "--auto with explicit project-local tool denies",
+    "enabled_tools": "read, edit, write, glob, grep",
+    "denied_tools": "bash, webfetch, websearch, task, agent_manager, skill, lsp, external_directory, todowrite, todoread",
+    "dangerous_permission_bypass": "not used; --dangerously-skip-permissions is not used",
+    "remote_modes": "not used; attach, serve, web, remote, daemon, and cloud-fork modes are not used",
+    "task_delivery": "task copied into supplied worktree at .kilo/axiom-task.md; prompt instructs Kilo to read that file",
+    "prompt_protocol": "isolated-worktree-v1-no-recursive-harness"
+  }
 }
