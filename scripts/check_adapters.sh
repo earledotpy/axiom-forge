@@ -37,6 +37,11 @@ if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
   if [[ -x "$QODER_DIRECT_BIN/qodercli-1.0.30.exe" ]]; then
     export PATH="$QODER_DIRECT_BIN:$PATH"
   fi
+
+  KILO_DIRECT_BIN="$(cygpath -u "$USERPROFILE")/.npm-global"
+  if [[ -x "$KILO_DIRECT_BIN/kilo" ]]; then
+    export PATH="$KILO_DIRECT_BIN:$PATH"
+  fi
 fi
 
 first_line() {
@@ -110,6 +115,7 @@ report_cli_adapter "opencode" "opencode" "required" || required_cli_missing=1
 report_cli_adapter "cursor" "cursor-agent.cmd" "required" || required_cli_missing=1
 report_cli_adapter "kiro" "kiro-cli.exe" "required" || required_cli_missing=1
 report_cli_adapter "qoder" "qodercli-1.0.30.exe" "required" || required_cli_missing=1
+report_cli_adapter "kilo" "kilo" "required" || required_cli_missing=1
 
 if [[ "$required_cli_missing" -ne 0 ]]; then
   echo
