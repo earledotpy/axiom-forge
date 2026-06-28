@@ -24,9 +24,7 @@ ACCEPTANCE_SCRIPT="$CASE_DIR/accept.sh"
 ADAPTER_SCRIPT="$ROOT/agents/$ADAPTER.sh"
 ADAPTER_CONFIGURATION="$ROOT/agents/$ADAPTER.qualification.json"
 
-[[ -f "$TASK_FILE" ]] || die "missing_qualification_task"
-[[ -s "$ALLOWED_PATHS_FILE" ]] || die "missing_qualification_allowed_paths"
-[[ -f "$ACCEPTANCE_SCRIPT" ]] || die "missing_qualification_acceptance"
+CASE_ERROR="$(python "$SCRIPT_DIR/qualification_case.py" validate --root "$ROOT" --case "$CASE")" || die "$CASE_ERROR"
 [[ -x "$ADAPTER_SCRIPT" ]] || die "agent_adapter_not_found"
 
 RUN_ID=""
