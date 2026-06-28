@@ -1,0 +1,102 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts import run_record
+
+
+class RunRecordTests(unittest.TestCase):
+    def test_write_record_uses_strict_schema_and_current_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "record.json"
+
+            run_record.write_record(
+                path,
+                run_id="run-1",
+                agent="agent",
+                base_sha="abc123",
+                status="COMPLETED",
+                task_file="task.md",
+                patch_file="patch.diff",
+                patch_sha256="hash",
+                failure_reason="",
+                cli_command="python",
+                cli_path="/bin/python",
+                cli_version="Python 3",
+            )
+
+            record = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["run_id"], "run-1")
+        self.assertEqual(record["target_repo"], ".")
+        self.assertEqual(record["patch_sha256"], "hash")
+        self.assertIsNone(record["failure_reason"])
+        self.assertEqual(record["cli_command"], "python")
+        self.assertIn("timestamp_utc", record)
+
+    def test_completed_validation_accepts_older_record_shape(self):
+        record = {
+            "schema_version": 1,
+            "run_id": "old-run",
+            "agent": "agent",
+            "target_repo": ".",
+            "base_sha": "abc123",
+            "patch_file": "patch.diff",
+            "run_status": "COMPLETED",
+        }
+
+        validated = run_record.validate_completed_record(
+            record,
+            run_dir_name="old-run",
+            patch_sha256_actual="actual",
+        )
+
+        self.assertEqual(validated["run_id"], "old-run")
+        self.assertEqual(validated["base_sha"], "abc123")
+
+    def test_patch_hash_mismatch_fails_completed_validation(self):
+        record = {
+            "run_id": "run-1",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "patch_sha256": "expected",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(
+                record,
+                run_dir_name="run-1",
+                patch_sha256_actual="actual",
+            )
+
+        self.assertEqual(caught.exception.reason, "patch_sha256_mismatch")
+
+    def test_run_id_directory_mismatch_fails_completed_validation(self):
+        record = {
+            "run_id": "record-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="dir-run")
+
+        self.assertEqual(caught.exception.reason, "run_id_directory_mismatch")
+
+    def test_non_completed_record_fails_completed_validation(self):
+        record = {
+            "run_id": "run-1",
+            "base_sha": "abc123",
+            "run_status": "FAILED",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="run-1")
+
+        self.assertEqual(caught.exception.reason, "run_not_completed")
+
+
+if __name__ == "__main__":
+    unittest.main()

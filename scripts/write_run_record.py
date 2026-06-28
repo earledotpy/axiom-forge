@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-
-def clean(value):
-    return None if value == "" else value
+from run_record import write_record
 
 
 parser = argparse.ArgumentParser()
@@ -24,21 +18,17 @@ parser.add_argument("--cli-path", default="")
 parser.add_argument("--cli-version", default="")
 args = parser.parse_args()
 
-out = {
-    "schema_version": 2,
-    "run_id": args.run_id,
-    "agent": args.agent,
-    "target_repo": ".",
-    "base_sha": args.base_sha,
-    "task_file": clean(args.task_file),
-    "patch_file": clean(args.patch_file),
-    "patch_sha256": clean(args.patch_sha256),
-    "cli_command": clean(args.cli_command),
-    "cli_path": clean(args.cli_path),
-    "cli_version": clean(args.cli_version),
-    "run_status": args.status,
-    "failure_reason": clean(args.failure_reason),
-    "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-}
-
-Path(args.file).write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
+write_record(
+    args.file,
+    run_id=args.run_id,
+    agent=args.agent,
+    base_sha=args.base_sha,
+    status=args.status,
+    task_file=args.task_file,
+    patch_file=args.patch_file,
+    patch_sha256=args.patch_sha256,
+    failure_reason=args.failure_reason,
+    cli_command=args.cli_command,
+    cli_path=args.cli_path,
+    cli_version=args.cli_version,
+)
