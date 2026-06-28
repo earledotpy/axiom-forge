@@ -1,7 +1,10 @@
-Axiom Forge
+# Axiom Forge
+
 Axiom Forge is a fail-closed verification and promotion gate for code produced by CLI coding agents.
 It is not a general multi-agent orchestrator. It does not schedule autonomous work, manage agent conversations, merge to `main`, or run a dashboard.
-The current v0.1 loop is:
+
+## The Loop
+
 ```text
 task file
   -> isolated agent worktree
@@ -10,41 +13,112 @@ task file
   -> explicit operator approval
   -> gate/<run-id> branch
   -> structured promotion record
-````
-Core Rule
+```
+
+## Core Rule
+
 Agents do not modify the main repository directly.
 Agents may only modify disposable git worktrees. Axiom Forge captures their output as artifacts and promotes only through the gate.
-What v0.1 Proves
-Axiom Forge v0.1 proves that:
-a task can be run through a provider adapter,
-the adapter modifies only an isolated worktree,
-the runner captures `patch.diff`,
-the run is recorded in `record.json`,
-the verifier recomputes pass or fail from a fresh worktree,
-promotion requires exact operator approval,
-promoted patches land on `gate/<run-id>`,
-`main` remains unchanged,
-failed runs remain inspectable but cannot promote.
-Repository Shape
+
+## Standard Adapters
+
+Nine adapters hold `standard` trust after completing the three-case qualification series:
+
+| Adapter | CLI |
+| --- | --- |
+| `antigravity` | `agy` |
+| `codex` | `codex` |
+| `claude-code` | `claude` |
+| `copilot` | `copilot` |
+| `opencode` | `opencode` |
+| `cursor` | `cursor-agent.cmd` |
+| `kiro` | `kiro-cli.exe` |
+| `qoder` | `qodercli-1.0.30.exe` |
+| `kilo` | `kilo` |
+
+Standard trust is configuration-pinned. Any change to an adapter's script revision, CLI version, selected model, or relevant configuration invalidates standard status until a new qualification series succeeds.
+
+Qualification evidence and pinned configurations are recorded in `docs/adapter-evidence.md`.
+
+## Adapter Qualification
+
+An adapter earns `standard` trust by completing three consecutive, independent, in-scope qualification runs — one per case (`behavior-change`, `new-behavior`, `edge-case`) — each producing a verified patch and passing its task-specific acceptance test. A failed, unsafe, or incomplete run resets the series.
+
+Run a single qualification case:
+
+```bash
+bash scripts/qualify_adapter.sh <adapter> <case>
+```
+
+Evaluate a completed result series:
+
+```bash
+python scripts/evaluate_qualification_series.py \
+  runs/<run-id-1>/qualification.json \
+  runs/<run-id-2>/qualification.json \
+  runs/<run-id-3>/qualification.json
+```
+
+Generate a reviewable Markdown snippet for `docs/adapter-evidence.md`:
+
+```bash
+python scripts/qualification_report.py \
+  runs/<run-id-1>/qualification.json \
+  runs/<run-id-2>/qualification.json \
+  runs/<run-id-3>/qualification.json
+```
+
+The snippet is printed to stdout for operator review before any doc is updated.
+
+## Repository Shape
+
 ```text
 agents/
-  manual-simulated-agent.sh
-  codex.sh
-  claude-code.sh
+  <adapter>.sh                   # operator-facing adapter scripts
+  <adapter>.qualification.json   # adapter configuration for qualification
+
+docs/
+  adapter-evidence.md            # committed qualification record and standard-adapter registry
+
+qualification/
+  cases/
+    behavior-change/             # task, allowed-paths, acceptance test
+    new-behavior/
+    edge-case/
 
 scripts/
-  run_agent_task.sh
-  validate_run_dir.sh
-  verify_patch.sh
-  promote.sh
-  forge_check.sh
+  run_agent_task.sh              # run one adapter against one task
+  validate_run_dir.sh            # validate a captured run directory
+  verify_patch.sh                # verify a patch from a fresh worktree
+  promote.sh                     # gate and promote a verified run
+  qualify_adapter.sh             # run one qualification case end-to-end
+  forge_check.sh                 # full local health proof
+
+  run_record.py                  # run record schema and validation library
+  write_run_record.py            # CLI: write a run record
+  verifier_worktree.py           # patch apply and target verification library
+  qualification_case.py          # qualification case loading library
+  qualification_result.py        # qualification result building and series evaluation
+  write_qualification_result.py  # CLI: write a qualification result
+  evaluate_qualification_series.py  # CLI: evaluate a result series
+  adapter_identity.py            # adapter identity validation and CLI provenance capture
+  capture_cli_provenance.py      # CLI: capture CLI provenance (delegates to adapter_identity)
+  qualification_report.py        # library + CLI: render Markdown qualification snippets
 
 tasks/
-  *.task.md
+  *.task.md                      # operator-authored tasks for real agent runs
 
 tests/
-  promote/run_all.sh
-  runner/run_all.sh
+  gate_contract/run_all.sh       # gate failure and success contract matrix
+  promote/run_all.sh             # promotion matrix
+  runner/run_all.sh              # runner matrix
+  qualification/run_all.sh       # qualification case matrix
+  qualification_series/run_all.sh # qualification series matrix
+  test_run_record.py             # run record unit tests
+  test_verifier_worktree.py      # verifier worktree unit tests
+  test_qualification_modules.py  # qualification case/result unit tests
+  test_adapter_identity.py       # adapter identity unit tests
+  test_qualification_report.py   # qualification report unit tests
 
 runs/
   <run-id>/
@@ -53,35 +127,32 @@ runs/
     patch.diff
     stdout.log
     stderr.log
-    promotion.json
+    [qualification.json]         # present for qualification runs
+    [promotion.json]             # present after promotion
 ```
-`runs/` is ignored by git because run artifacts are local evidence, not source code.
-Agent Adapter Contract
+
+`runs/` is gitignored. Run artifacts are local evidence, not source code.
+
+## Agent Adapter Contract
+
 An adapter is an executable script:
+
 ```text
-agents/<agent-name>.sh <task_file> <worktree>
+agents/<adapter>.sh <task_file> <worktree>
 ```
-The runner owns worktree creation, log capture, patch capture, and record writing.
-The adapter may:
-read the task file,
-edit files inside the provided worktree,
-run checks inside the provided worktree.
-The adapter must not:
-commit,
-create or delete branches,
-change `HEAD`,
-modify files outside the provided worktree,
-depend on access to the main repository.
+
+The runner owns worktree creation, log capture, patch capture, and record writing. The adapter may read the task file and edit files inside the provided worktree.
+
+The adapter must not commit, create or delete branches, change `HEAD`, modify files outside the provided worktree, or depend on access to the main repository.
+
 If an adapter violates the contract, the runner records a failed run.
 
-The runner snapshots Git status, including ignored paths, immediately before
-and after adapter execution. Any status change in the target checkout outside
-the runner's disposable worktree fails closed with
-`adapter_modified_outside_worktree`. This detects checkout mutations; it is
-not OS-level containment and cannot observe arbitrary paths elsewhere on the
-host.
-Run Directory Contract
-A successful run directory contains:
+The runner snapshots git status immediately before and after adapter execution. Any status change in the target checkout outside the runner's disposable worktree fails closed with `adapter_modified_outside_worktree`.
+
+## Run Directory Contract
+
+A completed run directory contains:
+
 ```text
 runs/<run-id>/
   task.md
@@ -90,115 +161,92 @@ runs/<run-id>/
   stdout.log
   stderr.log
 ```
-A completed run has:
+
+A completed run record:
+
 ```json
 {
   "run_status": "COMPLETED",
   "patch_file": "patch.diff"
 }
 ```
-A failed run has:
+
+A failed run record:
+
 ```json
 {
   "run_status": "FAILED",
   "failure_reason": "<reason>"
 }
 ```
+
 Failed runs are evidence. They are not promotable inputs.
-Promotion Contract
-Promotion is performed with:
+
+## Promotion Contract
+
 ```bash
 bash scripts/promote.sh "runs/<run-id>"
 ```
-Promotion must:
-validate the run directory,
-reject stale base SHAs,
-verify the patch from a disposable worktree,
-require the operator to type the exact run id,
-create `gate/<run-id>`,
-apply and commit the patch there,
-rerun verification,
-write `promotion.json`.
-Promotion must fail closed if any required condition is missing.
-Health Check
-Run the full local proof with:
-```bash
-bash scripts/forge_check.sh
-```
-Expected final line:
-```text
-AXIOM_FORGE_CHECK: PASS
-```
-This runs:
-```bash
-bash scripts/check_adapters.sh
-bash tests/promote/run_all.sh
-bash tests/runner/run_all.sh
-```
 
-The health proof requires the CLI-backed standard adapters: `codex`, `claude`,
-and `antigravity` (`agy`).
-Example: Run a Task with Manual Adapter
+Promotion validates the run directory, rejects stale base SHAs, verifies the patch from a disposable worktree, requires the operator to type the exact run ID, creates `gate/<run-id>`, applies and commits the patch there, reruns verification, and writes `promotion.json`. It fails closed if any required condition is missing.
+
+## Operator Workflow Example
+
+Run a task:
+
 ```bash
-bash scripts/run_agent_task.sh manual-simulated-agent tasks/change-answer.task.md
-```
-Then set the printed run id:
-```bash
+bash scripts/run_agent_task.sh claude-code tasks/change-answer.task.md
 RUN_ID="<run-id>"
 ```
-Verify:
+
+Validate and verify:
+
 ```bash
 bash scripts/validate_run_dir.sh "runs/$RUN_ID"
 bash scripts/verify_patch.sh "runs/$RUN_ID"
 ```
+
 Promote:
+
 ```bash
 printf "%s\n" "$RUN_ID" | bash scripts/promote.sh "runs/$RUN_ID"
 ```
-Example: Run a Task with Codex
-```bash
-bash scripts/run_agent_task.sh codex tasks/codex-change-answer.task.md
-```
-Then validate, verify, and promote the printed run id.
-Example: Run a Task with Claude Code
-```bash
-bash scripts/run_agent_task.sh claude-code tasks/claude-change-answer.task.md
-```
-Then validate, verify, and promote the printed run id.
-Current Non-Goals
-Axiom Forge v0.1 does not implement:
-generic multi-agent orchestration,
-task decomposition,
-autonomous scheduling,
-dashboards or TUIs,
-agent-to-agent messaging,
-PR automation,
-cloud routing,
-local model runtime,
-persistent autonomous agents,
-cryptographic approvals,
-container sandboxing.
-Those features require evidence from actual run records or explicit operator decisions.
 
-## Scope Discipline
+## Health Check
 
-Axiom Forge stays deliberately narrow: it captures, verifies, and promotes
-agent-produced patches; it does not become the system that schedules or
-coordinates agents.
-
-Any expansion beyond the current gate should be justified by a captured run,
-a recorded failure, or an explicit operator decision.
-
-Git worktrees isolate repository changes for this workflow. They are not a
-claim of general OS-level containment; container sandboxing remains outside
-v0.1.
-
-Baseline
-The local v0.1 baseline is proven when:
 ```bash
 bash scripts/forge_check.sh
 ```
-returns:
+
+Expected final line:
+
 ```text
 AXIOM_FORGE_CHECK: PASS
 ```
+
+This runs the adapter CLI preflight and all five test matrices:
+
+```bash
+bash scripts/check_adapters.sh
+bash tests/gate_contract/run_all.sh
+bash tests/promote/run_all.sh
+bash tests/runner/run_all.sh
+bash tests/qualification/run_all.sh
+bash tests/qualification_series/run_all.sh
+```
+
+The health proof requires the CLIs for all standard adapters to be present on the host.
+
+## Non-Goals
+
+Axiom Forge does not implement:
+
+- generic multi-agent orchestration
+- task decomposition or autonomous scheduling
+- dashboards or TUIs
+- agent-to-agent messaging or PR automation
+- cloud routing or container sandboxing
+- persistent autonomous agents
+- cryptographic approvals
+
+Any expansion beyond the current gate requires justification by a captured run, a recorded failure, or an explicit operator decision.
