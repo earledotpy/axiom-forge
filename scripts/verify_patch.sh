@@ -25,25 +25,24 @@ OUT="$RUN_DIR/verify.json"
 RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
 
-VERIFY_WT="$(mktemp -d)"
-rmdir "$VERIFY_WT"
-
-cleanup() {
-  if [[ -n "${VERIFY_WT:-}" && -d "$VERIFY_WT" ]]; then
-    git worktree remove -f "$VERIFY_WT" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
-
-git worktree add --detach "$VERIFY_WT" "$BASE_SHA" >/dev/null || die "verify_worktree_create_failed"
-
-git -C "$VERIFY_WT" apply --check --whitespace=error "$ROOT/$PATCH" || die "patch_check_failed"
-git -C "$VERIFY_WT" apply --whitespace=error "$ROOT/$PATCH" || die "patch_apply_failed"
-
-python "$SCRIPT_DIR/verify_target.py" \
+set +e
+python "$SCRIPT_DIR/verifier_worktree.py" verify-detached \
+  --repo-root "$ROOT" \
+  --script-dir "$SCRIPT_DIR" \
+  --base-sha "$BASE_SHA" \
+  --patch "$ROOT/$PATCH" \
   --config "$CONFIG" \
-  --worktree "$VERIFY_WT" \
-  --out "$OUT" \
-  || die "verification_failed"
+  --out "$OUT"
+VERIFY_STATUS=$?
+set -e
+
+case "$VERIFY_STATUS" in
+  0) ;;
+  10) die "verify_worktree_create_failed" ;;
+  20) die "patch_check_failed" ;;
+  21) die "patch_apply_failed" ;;
+  30) die "verification_failed" ;;
+  *) die "verification_failed" ;;
+esac
 
 echo "VERIFY_PATCH: PASS $RUN_ID"

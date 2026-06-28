@@ -89,8 +89,19 @@ rmdir "$GATE_WT"
 git worktree add -b "$BRANCH" "$GATE_WT" "$BASE_SHA" >/dev/null || fail_closed "gate_worktree_create_failed"
 BRANCH_CREATED=1
 
-git -C "$GATE_WT" apply --check --whitespace=error "$ROOT/$PATCH" || fail_closed "gate_patch_check_failed"
-git -C "$GATE_WT" apply --whitespace=error "$ROOT/$PATCH" || fail_closed "gate_patch_apply_failed"
+set +e
+python "$SCRIPT_DIR/verifier_worktree.py" apply-patch \
+  --worktree "$GATE_WT" \
+  --patch "$ROOT/$PATCH"
+PATCH_STATUS=$?
+set -e
+
+case "$PATCH_STATUS" in
+  0) ;;
+  20) fail_closed "gate_patch_check_failed" ;;
+  21) fail_closed "gate_patch_apply_failed" ;;
+  *) fail_closed "gate_patch_apply_failed" ;;
+esac
 
 git -C "$GATE_WT" add -A
 git -C "$GATE_WT" commit \
@@ -101,7 +112,8 @@ git -C "$GATE_WT" commit \
 
 PROMOTION_COMMIT="$(git -C "$GATE_WT" rev-parse HEAD)" || fail_closed "promotion_commit_lookup_failed"
 
-python "$SCRIPT_DIR/verify_target.py" \
+python "$SCRIPT_DIR/verifier_worktree.py" verify-target \
+  --script-dir "$SCRIPT_DIR" \
   --config "$CONFIG" \
   --worktree "$GATE_WT" \
   --out "$RUN_DIR/post_verify.json" \
