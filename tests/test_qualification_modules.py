@@ -164,7 +164,9 @@ class QualificationModuleTests(unittest.TestCase):
         result = complete_result()
         result["adapter_configuration"]["relevant_configuration"] = "not-a-dict"
 
-        self.assertIsNone(qualification_result.identity_for(result))
+        self.assertIsNone(
+            qualification_result.identity_for(result["adapter_configuration"])
+        )
 
 
 if __name__ == "__main__":

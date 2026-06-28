@@ -4,21 +4,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from adapter_identity import (
+        build_identity_evidence,
+        build_partial_identity_evidence,
+        identity_for,
+    )
     from qualification_case import load_case
 except ImportError:
+    from scripts.adapter_identity import (
+        build_identity_evidence,
+        build_partial_identity_evidence,
+        identity_for,
+    )
     from scripts.qualification_case import load_case
 
 
 CASES = {"behavior-change", "new-behavior", "edge-case"}
-IDENTITY_FIELDS = (
-    "adapter_script",
-    "adapter_script_revision",
-    "cli_command",
-    "cli_path",
-    "cli_version",
-    "selected_model",
-    "relevant_configuration",
-)
 
 
 def read_json(path):
@@ -58,19 +59,20 @@ def build_result(
     configuration = read_json(adapter_configuration_path)
     adapter_configuration = None
     if record is not None:
-        adapter_configuration = {
-            "adapter_script": adapter_script,
-            "adapter_script_revision": adapter_script_revision or None,
-            "cli_command": record.get("cli_command"),
-            "cli_path": record.get("cli_path"),
-            "cli_version": record.get("cli_version"),
-            "selected_model": None
-            if configuration is None
-            else configuration.get("selected_model"),
-            "relevant_configuration": None
-            if configuration is None
-            else configuration.get("relevant_configuration"),
-        }
+        try:
+            adapter_configuration = build_identity_evidence(
+                adapter_script=adapter_script,
+                adapter_script_revision=adapter_script_revision,
+                record=record,
+                adapter_configuration=configuration,
+            )
+        except Exception:
+            adapter_configuration = build_partial_identity_evidence(
+                adapter_script=adapter_script,
+                adapter_script_revision=adapter_script_revision,
+                record=record,
+                adapter_configuration=configuration,
+            )
 
     return {
         "schema_version": 1,
@@ -105,17 +107,6 @@ def load_result(path):
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
         raise ValueError(f"invalid_result:{path}:{exc}") from exc
-
-
-def identity_for(result):
-    configuration = result.get("adapter_configuration")
-    if not isinstance(configuration, dict):
-        return None
-    if any(not configuration.get(field) for field in IDENTITY_FIELDS):
-        return None
-    if not isinstance(configuration["relevant_configuration"], dict):
-        return None
-    return {field: configuration[field] for field in IDENTITY_FIELDS}
 
 
 def summary(result):
@@ -160,7 +151,7 @@ def evaluate(results):
     for result in results:
         case = result.get("case")
         run_id = result.get("run_id")
-        identity = identity_for(result)
+        identity = identity_for(result.get("adapter_configuration"))
 
         failure_reason = result_failure_reason(result)
         if failure_reason is not None:

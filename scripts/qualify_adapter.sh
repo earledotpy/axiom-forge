@@ -100,36 +100,14 @@ ADAPTER_SCRIPT_REVISION="$(git rev-parse "HEAD:agents/$ADAPTER.sh")" || {
   die "qualification_adapter_script_revision_missing"
 }
 
-if ! python - "$ADAPTER_CONFIGURATION" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-try:
-    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    assert isinstance(data["selected_model"], str) and data["selected_model"]
-    assert isinstance(data["relevant_configuration"], dict)
-except Exception:
-    raise SystemExit(1)
-PY
-then
-  write_result "FAILED" "identity" "adapter_configuration_incomplete" "PASSED" "PASSED" "NOT_RUN" "NOT_RUN"
-  die "qualification_adapter_configuration_incomplete"
-fi
-
-if ! python - "$RUN_DIR/record.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-record = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-for key in ("cli_command", "cli_path", "cli_version"):
-    assert isinstance(record.get(key), str) and record[key]
-PY
-then
-  write_result "FAILED" "identity" "cli_provenance_incomplete" "PASSED" "PASSED" "NOT_RUN" "NOT_RUN"
-  die "qualification_cli_provenance_incomplete"
-fi
+IDENTITY_ERROR="$(
+  python "$SCRIPT_DIR/adapter_identity.py" validate-qualification-inputs \
+    --record "$RUN_DIR/record.json" \
+    --adapter-configuration "$ADAPTER_CONFIGURATION"
+)" || {
+  write_result "FAILED" "identity" "$IDENTITY_ERROR" "PASSED" "PASSED" "NOT_RUN" "NOT_RUN"
+  die "qualification_$IDENTITY_ERROR"
+}
 
 PATCH="$RUN_DIR/patch.diff"
 while IFS=$'\t' read -r _ _ path; do
