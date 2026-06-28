@@ -95,5 +95,35 @@ class AdapterIdentityTests(unittest.TestCase):
         self.assertNotEqual(adapter_identity.identity_for(first), adapter_identity.identity_for(second))
 
 
+class CaptureCliProvenanceTests(unittest.TestCase):
+    def test_capture_returns_exact_provenance_keys_for_found_command(self):
+        provenance = adapter_identity.capture_cli_provenance("python")
+
+        self.assertCountEqual(list(provenance.keys()), ["cli_command", "cli_path", "cli_version"])
+        self.assertEqual(provenance["cli_command"], "python")
+        self.assertIsInstance(provenance["cli_path"], str)
+        self.assertTrue(provenance["cli_path"])
+
+    def test_capture_raises_adapter_identity_error_for_missing_cli(self):
+        with self.assertRaises(adapter_identity.AdapterIdentityError) as caught:
+            adapter_identity.capture_cli_provenance("axiom-cli-that-does-not-exist")
+
+        self.assertEqual(
+            caught.exception.reason, "axiom-cli-that-does-not-exist_cli_not_found"
+        )
+
+    def test_capture_version_is_string_or_none(self):
+        provenance = adapter_identity.capture_cli_provenance("python")
+
+        self.assertIn(type(provenance["cli_version"]), (str, type(None)))
+
+    def test_capture_result_satisfies_require_cli_provenance_when_version_present(self):
+        provenance = adapter_identity.capture_cli_provenance("python")
+
+        if provenance["cli_version"] is not None:
+            validated = adapter_identity.require_cli_provenance(provenance)
+            self.assertEqual(validated["cli_command"], "python")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -19,6 +22,38 @@ class AdapterIdentityError(Exception):
     def __init__(self, reason):
         super().__init__(reason)
         self.reason = reason
+
+
+def capture_cli_provenance(cli_command):
+    path = shutil.which(cli_command)
+    if path is None:
+        raise AdapterIdentityError(f"{cli_command}_cli_not_found")
+    try:
+        resolved_path = str(Path(path).resolve())
+    except OSError:
+        resolved_path = path
+    version = None
+    try:
+        result = subprocess.run(
+            [resolved_path, "--version"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        version = next(
+            (line.strip() for line in result.stdout.splitlines() if line.strip()),
+            None,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {
+        "cli_command": cli_command,
+        "cli_path": resolved_path,
+        "cli_version": version,
+    }
 
 
 def read_json(path):
@@ -113,7 +148,20 @@ def main():
     validate_parser.add_argument("--record", required=True)
     validate_parser.add_argument("--adapter-configuration", required=True)
 
+    capture_parser = subparsers.add_parser("capture-provenance")
+    capture_parser.add_argument("--command", dest="cli_command", required=True)
+    capture_parser.add_argument("--file", required=True)
+
     args = parser.parse_args()
+
+    if args.command == "capture-provenance":
+        try:
+            provenance = capture_cli_provenance(args.cli_command)
+        except AdapterIdentityError as exc:
+            print(exc.reason, file=sys.stderr)
+            return 127
+        Path(args.file).write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+        return 0
 
     try:
         if args.command == "validate-qualification-inputs":
