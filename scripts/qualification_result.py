@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -107,6 +108,28 @@ def load_result(path):
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
         raise ValueError(f"invalid_result:{path}:{exc}") from exc
+
+
+def load_results_for_adapter(root, adapter):
+    """Return qualification results for an adapter sorted by filename (chronological by run-ID)."""
+    rd = Path(root) / "qualification" / "results" / adapter
+    if not rd.is_dir():
+        return []
+    return [load_result(str(p)) for p in sorted(rd.glob("*.json"))]
+
+
+def check_results_clean(root, adapter):
+    """Raise ValueError if qualification/results/<adapter>/ has uncommitted changes."""
+    rel = f"qualification/results/{adapter}"
+    proc = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--", rel],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise ValueError(f"git_status_failed:{adapter}")
+    if proc.stdout.strip():
+        raise ValueError(f"results_not_committed:{adapter}")
 
 
 def summary(result):

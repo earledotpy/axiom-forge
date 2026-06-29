@@ -10,7 +10,7 @@ TASK_FILE="$1"
 WORKTREE="$2"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-CONFIG_FILE="$SCRIPT_DIR/antigravity.qualification.json"
+CONFIG_FILE="$SCRIPT_DIR/../qualification/adapters/antigravity.json"
 MODEL="$(python - "$CONFIG_FILE" <<'PY'
 import json
 import sys

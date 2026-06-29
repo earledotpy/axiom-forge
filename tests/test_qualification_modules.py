@@ -88,8 +88,8 @@ class QualificationModuleTests(unittest.TestCase):
             }
             record_path = run_dir / "record.json"
             record_path.write_text(json.dumps(record), encoding="utf-8")
-            config_path = Path(tmp) / "agents" / "qualification-simulated-agent.qualification.json"
-            config_path.parent.mkdir()
+            config_path = Path(tmp) / "qualification" / "adapters" / "qualification-simulated-agent.json"
+            config_path.parent.mkdir(parents=True)
             config_path.write_text(
                 json.dumps(
                     {

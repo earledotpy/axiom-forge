@@ -53,19 +53,13 @@ bash scripts/qualify_adapter.sh <adapter> <case>
 Evaluate a completed result series:
 
 ```bash
-python scripts/evaluate_qualification_series.py \
-  runs/<run-id-1>/qualification.json \
-  runs/<run-id-2>/qualification.json \
-  runs/<run-id-3>/qualification.json
+python scripts/evaluate_qualification_series.py --adapter <adapter>
 ```
 
 Generate a reviewable Markdown snippet for `docs/adapter-evidence.md`:
 
 ```bash
-python scripts/qualification_report.py \
-  runs/<run-id-1>/qualification.json \
-  runs/<run-id-2>/qualification.json \
-  runs/<run-id-3>/qualification.json
+python scripts/qualification_report.py --adapter <adapter>
 ```
 
 The snippet is printed to stdout for operator review before any doc is updated.
@@ -75,16 +69,19 @@ The snippet is printed to stdout for operator review before any doc is updated.
 ```text
 agents/
   <adapter>.sh                   # operator-facing adapter scripts
-  <adapter>.qualification.json   # adapter configuration for qualification
 
 docs/
   adapter-evidence.md            # committed qualification record and standard-adapter registry
 
 qualification/
+  adapters/
+    <adapter>.json               # adapter configuration declaration (model, relevant config)
   cases/
     behavior-change/             # task, allowed-paths, acceptance test
     new-behavior/
     edge-case/
+  results/
+    <adapter>/                   # committed qualification results for that adapter
 
 scripts/
   run_agent_task.sh              # run one adapter against one task

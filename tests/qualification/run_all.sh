@@ -10,7 +10,7 @@ git clone -q "$ROOT" "$SANDBOX"
 
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-simulated-agent behavior-change)
 
-RESULT="$(find "$SANDBOX/runs" -mindepth 2 -maxdepth 2 -path '*/qualification.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+RESULT="$(find "$SANDBOX/qualification/results/qualification-simulated-agent" -name '*.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
 
 python - "$RESULT" <<'PY'
 import json
@@ -35,7 +35,7 @@ echo "PASS: Q1_behavior_change_qualification_succeeds"
 
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-new-behavior-agent new-behavior)
 
-RESULT="$(find "$SANDBOX/runs" -mindepth 2 -maxdepth 2 -path '*/qualification.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+RESULT="$(find "$SANDBOX/qualification/results/qualification-new-behavior-agent" -name '*.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
 
 python - "$RESULT" <<'PY'
 import json
@@ -52,7 +52,7 @@ echo "PASS: Q2_new_behavior_qualification_succeeds"
 
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-edge-case-agent edge-case)
 
-RESULT="$(find "$SANDBOX/runs" -mindepth 2 -maxdepth 2 -path '*/qualification.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+RESULT="$(find "$SANDBOX/qualification/results/qualification-edge-case-agent" -name '*.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
 
 python - "$RESULT" <<'PY'
 import json
@@ -79,7 +79,7 @@ expect_failure() {
     exit 1
   fi
 
-  result="$(find "$SANDBOX/runs" -mindepth 2 -maxdepth 2 -path '*/qualification.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
+  result="$(find "$SANDBOX/qualification/results/$adapter" -name '*.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
   python - "$result" "$expected_reason" <<'PY'
 import json
 import sys

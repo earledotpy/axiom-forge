@@ -9,9 +9,9 @@ import json
 import sys
 
 try:
-    from qualification_result import evaluate, load_result
+    from qualification_result import check_results_clean, evaluate, load_results_for_adapter
 except ImportError:
-    from scripts.qualification_result import evaluate, load_result
+    from scripts.qualification_result import check_results_clean, evaluate, load_results_for_adapter
 
 
 def render_qualification_snippet(outcome):
@@ -85,15 +85,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Render a reviewable Markdown snippet from qualification result files."
     )
-    parser.add_argument(
-        "results",
-        nargs="+",
-        help="qualification.json files, oldest to newest",
-    )
+    parser.add_argument("--adapter", required=True, help="adapter name")
+    parser.add_argument("--root", default=".", help="repository root (default: .)")
     args = parser.parse_args()
 
     try:
-        loaded = [load_result(path) for path in args.results]
+        check_results_clean(args.root, args.adapter)
+        loaded = load_results_for_adapter(args.root, args.adapter)
         outcome = evaluate(loaded)
         snippet = render_qualification_snippet(outcome)
     except (ValueError, OSError) as exc:

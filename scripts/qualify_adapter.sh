@@ -22,7 +22,7 @@ TASK_FILE="$CASE_DIR/task.md"
 ALLOWED_PATHS_FILE="$CASE_DIR/allowed-paths.txt"
 ACCEPTANCE_SCRIPT="$CASE_DIR/accept.sh"
 ADAPTER_SCRIPT="$ROOT/agents/$ADAPTER.sh"
-ADAPTER_CONFIGURATION="$ROOT/agents/$ADAPTER.qualification.json"
+ADAPTER_CONFIGURATION="$ROOT/qualification/adapters/$ADAPTER.json"
 
 CASE_ERROR="$(python "$SCRIPT_DIR/qualification_case.py" validate --root "$ROOT" --case "$CASE")" || die "$CASE_ERROR"
 [[ -x "$ADAPTER_SCRIPT" ]] || die "agent_adapter_not_found"
@@ -48,7 +48,7 @@ write_result() {
   local acceptance="$7"
 
   python "$SCRIPT_DIR/write_qualification_result.py" \
-    --file "$RUN_DIR/qualification.json" \
+    --file "$QUAL_RESULT_FILE" \
     --status "$status" \
     --stage "$stage" \
     --failure-reason "$reason" \
@@ -79,6 +79,9 @@ printf '%s\n' "$CAPTURE_OUTPUT"
 RUN_ID="$(printf '%s\n' "$CAPTURE_OUTPUT" | sed -nE 's/^RUN_(CAPTURED|FAILED): ([A-Za-z0-9_-]+)$/\2/p' | tail -n 1)"
 [[ -n "$RUN_ID" ]] || die "qualification_run_id_not_found"
 RUN_DIR="$ROOT/runs/$RUN_ID"
+QUAL_RESULT_DIR="$ROOT/qualification/results/$ADAPTER"
+mkdir -p "$QUAL_RESULT_DIR"
+QUAL_RESULT_FILE="$QUAL_RESULT_DIR/$RUN_ID.json"
 
 if [[ "${CAPTURE_STATUS:-0}" -ne 0 ]]; then
   write_result "FAILED" "run_capture" "run_capture_failed" "FAILED" "NOT_RUN" "NOT_RUN" "NOT_RUN"

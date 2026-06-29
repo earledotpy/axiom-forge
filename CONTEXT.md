@@ -16,6 +16,10 @@ _Avoid_: qualification run, acceptance test
 The evidence directory produced from one agent invocation, including its run record and patch. A captured run may be verified without being promoted.
 _Avoid_: execution, job
 
+**Captured run record**:
+The structured evidence item inside a captured run that identifies the run, agent, base, task, patch, CLI provenance, and completed or failed status.
+_Avoid_: log, qualification report, promotion record
+
 **Verified patch**:
 A captured run's patch that passes run-directory validation and patch verification from its recorded base in a fresh detached worktree. Verification does not approve or promote the patch.
 _Avoid_: approved patch, promoted patch
@@ -41,7 +45,7 @@ The operator-controlled list of paths a qualification patch may modify. A change
 _Avoid_: implied scope, broad task
 
 **Independent qualification tasks**:
-The three distinct task categories used for one adapter qualification: modifying existing behavior, adding a small new behavior, and handling a defined edge case. Variations of one edit type do not form a qualification series.
+The three distinct task categories used for one adapter qualification: `behavior-change` (modifying existing behavior), `new-behavior` (adding a small new behavior), and `edge-case` (handling a defined edge case). Variations of one edit type do not form a qualifying series.
 _Avoid_: repeated task, string-only variations
 
 **Qualification fixture**:
@@ -49,8 +53,16 @@ The dedicated source fixture and acceptance harness used for adapter qualificati
 _Avoid_: general test fixture, production task
 
 **Qualification command**:
-The dedicated command that evaluates one adapter against one qualification case. It captures the run, verifies the patch, enforces task scope, runs external acceptance, captures configuration identity, and writes a structured result.
+The dedicated command that evaluates one adapter against one qualification case. It captures the run, verifies the patch, enforces task scope, runs external acceptance, captures configuration identity, and writes a qualification result.
 _Avoid_: manual run sequence, ad hoc checklist
+
+**Qualification result**:
+The structured evidence record produced by one qualification command evaluation. The qualification command writes it and the operator commits it. Once committed, it is a permanent element of that adapter's qualification history and cannot be excluded from series evaluation.
+_Avoid_: qualification log, run verdict
+
+**Qualification series**:
+The complete ordered sequence of committed qualification results for one adapter, derived automatically in run-ID order without operator selection. The series is qualifying when it ends with an unbroken streak of PASSED results covering all three required case types with a consistent pinned adapter configuration.
+_Avoid_: result batch, selected evidence set
 
 **Qualification case**:
 A committed directory containing one agent-visible task and its operator-controlled allowed paths and acceptance code. The qualification command supplies only the task to the agent.
@@ -63,6 +75,10 @@ _Avoid_: raw run directory, verbal approval
 **Adapter configuration**:
 The reproducible identity of one adapter qualification target: the adapter-script revision, CLI version, selected model, and relevant configuration. Registration applies to this configuration rather than to a CLI product name alone.
 _Avoid_: adapter name, provider
+
+**Qualification configuration declaration**:
+The operator-committed file stating the selected model and relevant configuration for one adapter's qualification. Combined with the adapter-script revision and the CLI provenance captured at run time, it completes the adapter configuration identity recorded in each qualification result.
+_Avoid_: adapter config file, settings file
 
 **Configuration drift**:
 A change to a standard adapter's adapter-script revision, CLI version, selected model, or relevant configuration. Drift invalidates standard trust until the changed configuration completes a new adapter qualification.
