@@ -115,11 +115,13 @@ class RenderQualificationSnippetTests(unittest.TestCase):
 class QualificationReportCLITests(unittest.TestCase):
     def test_cli_prints_snippet_to_stdout_from_result_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # Write three qualification result files to simulate saved run artifacts
+            adapter = "test-adapter"
             cases = ["behavior-change", "new-behavior", "edge-case"]
-            paths = []
-            for case in cases:
-                result_path = Path(tmp) / f"qualification-{case}.json"
+            results_dir = Path(tmp) / "qualification" / "results" / adapter
+            results_dir.mkdir(parents=True)
+
+            for i, case in enumerate(cases, 1):
+                result_path = results_dir / f"{i:04d}-{case}.json"
                 result_path.write_text(
                     json.dumps(
                         {
@@ -127,7 +129,7 @@ class QualificationReportCLITests(unittest.TestCase):
                             "status": "PASSED",
                             "stage": "complete",
                             "failure_reason": None,
-                            "adapter": "test-adapter",
+                            "adapter": adapter,
                             "case": case,
                             "run_id": f"run-{case}",
                             "base_sha": "abc123",
@@ -165,10 +167,27 @@ class QualificationReportCLITests(unittest.TestCase):
                     ),
                     encoding="utf-8",
                 )
-                paths.append(str(result_path))
+
+            # Initialize a git repo and commit the results so check_results_clean passes
+            subprocess.run(["git", "init", tmp], check=True, capture_output=True)
+            subprocess.run(["git", "-C", tmp, "add", "."], check=True, capture_output=True)
+            subprocess.run(
+                [
+                    "git", "-C", tmp,
+                    "-c", "user.email=test@test.com",
+                    "-c", "user.name=Test",
+                    "commit", "-m", "test results",
+                ],
+                check=True,
+                capture_output=True,
+            )
 
             proc = subprocess.run(
-                [sys.executable, "scripts/qualification_report.py"] + paths,
+                [
+                    sys.executable, "scripts/qualification_report.py",
+                    "--adapter", adapter,
+                    "--root", tmp,
+                ],
                 capture_output=True,
                 text=True,
                 cwd=str(Path(__file__).parent.parent),
