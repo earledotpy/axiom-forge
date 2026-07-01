@@ -8,6 +8,15 @@ SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 git clone -q "$ROOT" "$SANDBOX"
 
+# Commit any new result files so the next run sees a clean working tree.
+# run_agent_task.sh enforces a clean tree; qualification results are untracked
+# until the operator (or the test) commits them.
+commit_results() {
+  git -C "$SANDBOX" add qualification/results/
+  git -C "$SANDBOX" -c user.email=test@test.com -c user.name=Test \
+    commit -q -m "commit qualification results"
+}
+
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-simulated-agent behavior-change)
 
 RESULT="$(find "$SANDBOX/qualification/results/qualification-simulated-agent" -name '*.json' -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d' ' -f2-)"
@@ -32,6 +41,7 @@ assert result["case_spec"]["acceptance"]["sha256"]
 PY
 
 echo "PASS: Q1_behavior_change_qualification_succeeds"
+commit_results
 
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-new-behavior-agent new-behavior)
 
@@ -49,6 +59,7 @@ assert result["acceptance"] == "PASSED"
 PY
 
 echo "PASS: Q2_new_behavior_qualification_succeeds"
+commit_results
 
 (cd "$SANDBOX" && bash scripts/qualify_adapter.sh qualification-edge-case-agent edge-case)
 
@@ -66,6 +77,7 @@ assert result["acceptance"] == "PASSED"
 PY
 
 echo "PASS: Q3_edge_case_qualification_succeeds"
+commit_results
 
 expect_failure() {
   local name="$1"
@@ -90,6 +102,7 @@ assert result["status"] == "FAILED"
 assert result["failure_reason"] == sys.argv[2]
 PY
   echo "PASS: $name"
+  commit_results
 }
 
 expect_failure \
