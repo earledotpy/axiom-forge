@@ -28,6 +28,10 @@ _Avoid_: approved patch, promoted patch
 An adapter listed in the Axiom Forge adapter inventory. Registration is distinct from one successful captured run and does not itself imply standard status or trust.
 _Avoid_: approved adapter, trusted agent
 
+**Candidate adapter compatibility result**:
+Structured evidence that one candidate adapter configuration completed Axiom Forge's captured-run and verified-patch path. It answers basic CLI operability only; it is not adapter qualification evidence, standard trust, registration, or promotion approval.
+_Avoid_: qualification result, trust result, approval
+
 **Standard adapter**:
 A registered adapter granted `standard` status and trust after documented adapter qualification. Promotion is not required for this qualification decision.
 _Avoid_: promoted adapter, experimental adapter

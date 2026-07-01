@@ -15,7 +15,15 @@ def make_case(root, name="behavior-change"):
     return case_dir
 
 
-def complete_result(case="behavior-change", revision="rev-1"):
+def complete_result(
+    case="behavior-change",
+    revision="rev-1",
+    cli_version="Python 3",
+    selected_model="fixture-model",
+    relevant_configuration=None,
+):
+    if relevant_configuration is None:
+        relevant_configuration = {"protocol": "fixture-v1"}
     return {
         "status": "PASSED",
         "adapter": "qualification-simulated-agent",
@@ -42,9 +50,9 @@ def complete_result(case="behavior-change", revision="rev-1"):
             "adapter_script_revision": revision,
             "cli_command": "python",
             "cli_path": "/fixture/python",
-            "cli_version": "Python 3",
-            "selected_model": "fixture-model",
-            "relevant_configuration": {"protocol": "fixture-v1"},
+            "cli_version": cli_version,
+            "selected_model": selected_model,
+            "relevant_configuration": relevant_configuration,
         },
     }
 
@@ -157,6 +165,30 @@ class QualificationModuleTests(unittest.TestCase):
         drift = complete_result("new-behavior", revision="rev-2")
         self.assertEqual(
             qualification_result.evaluate([behavior, drift])["reason"],
+            "configuration_drift",
+        )
+
+    def test_series_resets_on_pinned_configuration_drift_fields(self):
+        behavior = complete_result("behavior-change")
+
+        cli_drift = complete_result("new-behavior", cli_version="Python 4")
+        self.assertEqual(
+            qualification_result.evaluate([behavior, cli_drift])["reason"],
+            "configuration_drift",
+        )
+
+        model_drift = complete_result("new-behavior", selected_model="fixture-model-2")
+        self.assertEqual(
+            qualification_result.evaluate([behavior, model_drift])["reason"],
+            "configuration_drift",
+        )
+
+        config_drift = complete_result(
+            "new-behavior",
+            relevant_configuration={"protocol": "fixture-v2"},
+        )
+        self.assertEqual(
+            qualification_result.evaluate([behavior, config_drift])["reason"],
             "configuration_drift",
         )
 

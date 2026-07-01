@@ -38,6 +38,16 @@ if find "$SANDBOX/qualification/results/manual-simulated-agent" -name '*.json' -
   exit 1
 fi
 
+OUT="$(cd "$SANDBOX" && python scripts/evaluate_qualification_series.py --adapter manual-simulated-agent)"
+python - "$OUT" <<'PY'
+import json
+import sys
+
+result = json.loads(sys.argv[1])
+assert result["status"] == "NOT_QUALIFIED"
+assert result["reason"] == "series_incomplete"
+PY
+
 echo "PASS: C1_candidate_compatibility_succeeds_without_qualification"
 
 if (cd "$SANDBOX" && bash scripts/check_candidate_adapter_compatibility.sh bad-empty-agent tasks/change-answer.task.md); then

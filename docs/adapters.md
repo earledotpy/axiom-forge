@@ -56,6 +56,11 @@ experimental   Usable only as a cautious experiment.
 
 ## Adapter Acceptance Criteria
 
+Candidate compatibility evidence is not enough to make an adapter `standard`.
+Compatibility shows that one candidate CLI configuration can operate through
+captured-run creation and patch verification; it does not grant registration,
+`standard` trust, or promotion approval.
+
 New adapters may become `standard` only after documented qualification:
 
 * it is callable from Git Bash,

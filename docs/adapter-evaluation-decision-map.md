@@ -78,6 +78,13 @@ The following current checks belong to the standard-trust decision:
 - committed evidence-register updates; and
 - registry promotion to `stable` status and `standard` trust.
 
+Existing qualification evidence remains interpretable under this split because
+it already records the stronger trust inputs: qualifying run IDs, task
+specifications, allowed-path specifications, acceptance specifications, patch
+hashes, scope and acceptance outcomes, and pinned adapter configuration.
+Compatibility results are separate local evidence and are not inputs to
+qualification series evaluation.
+
 ## ADR Conflict To Surface
 
 `docs/adr/0001-contiguous-adapter-qualification.md` says new adapters and

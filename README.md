@@ -81,6 +81,12 @@ only: it is not `standard` trust, not adapter registration, and not promotion
 approval. Failed checks are still recorded as structured compatibility evidence
 with the stable failure reason from the failing stage.
 
+Compatibility is intentionally weaker than qualification. Standard trust still
+requires the contiguous three-case qualification series, complete pinned adapter
+configuration evidence, task-specific acceptance, scope checks, and reset on
+failure, missing identity, task-incorrect behavior, out-of-scope changes, or
+configuration drift.
+
 ## Repository Shape
 
 ```text
