@@ -110,7 +110,7 @@ TARGET_STATUS_BEFORE="$(git status --porcelain=v1 --untracked-files=all --ignore
   || fail_run "target_repo_status_snapshot_failed"
 
 ADAPTER_EXIT=0
-AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
+PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || ADAPTER_EXIT=$?
 
 TARGET_STATUS_AFTER="$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" \

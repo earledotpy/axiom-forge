@@ -1,4 +1,5 @@
 /runs/
+/compatibility/results/
 /.forge/
 /tmp/
 __pycache__/

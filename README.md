@@ -64,6 +64,23 @@ python scripts/qualification_report.py --adapter <adapter>
 
 The snippet is printed to stdout for operator review before any doc is updated.
 
+## Candidate Compatibility
+
+A candidate adapter can be checked without running the full standard adapter
+qualification series:
+
+```bash
+bash scripts/check_candidate_adapter_compatibility.sh <adapter> <task-file>
+```
+
+The command runs the adapter through normal captured-run creation, run-directory
+validation, and patch verification. It writes
+`compatibility/results/<adapter>/<run-id>.json` with a
+`candidate_adapter_compatibility` result. That result is compatibility evidence
+only: it is not `standard` trust, not adapter registration, and not promotion
+approval. Failed checks are still recorded as structured compatibility evidence
+with the stable failure reason from the failing stage.
+
 ## Repository Shape
 
 ```text
@@ -83,17 +100,24 @@ qualification/
   results/
     <adapter>/                   # committed qualification results for that adapter
 
+compatibility/
+  results/
+    <adapter>/                   # local candidate compatibility results
+
 scripts/
   run_agent_task.sh              # run one adapter against one task
   validate_run_dir.sh            # validate a captured run directory
   verify_patch.sh                # verify a patch from a fresh worktree
   promote.sh                     # gate and promote a verified run
+  check_candidate_adapter_compatibility.sh # run one lightweight compatibility check
   qualify_adapter.sh             # run one qualification case end-to-end
   forge_check.sh                 # full local health proof
 
   run_record.py                  # run record schema and validation library
   write_run_record.py            # CLI: write a run record
   verifier_worktree.py           # patch apply and target verification library
+  compatibility_result.py        # candidate compatibility result library
+  write_compatibility_result.py  # CLI: write a compatibility result
   qualification_case.py          # qualification case loading library
   qualification_result.py        # qualification result building and series evaluation
   write_qualification_result.py  # CLI: write a qualification result
@@ -109,10 +133,12 @@ tests/
   gate_contract/run_all.sh       # gate failure and success contract matrix
   promote/run_all.sh             # promotion matrix
   runner/run_all.sh              # runner matrix
+  compatibility/run_all.sh       # candidate compatibility matrix
   qualification/run_all.sh       # qualification case matrix
   qualification_series/run_all.sh # qualification series matrix
   test_run_record.py             # run record unit tests
   test_verifier_worktree.py      # verifier worktree unit tests
+  test_compatibility_result.py   # compatibility result unit tests
   test_qualification_modules.py  # qualification case/result unit tests
   test_adapter_identity.py       # adapter identity unit tests
   test_qualification_report.py   # qualification report unit tests
@@ -221,13 +247,14 @@ Expected final line:
 AXIOM_FORGE_CHECK: PASS
 ```
 
-This runs the adapter CLI preflight and all five test matrices:
+This runs the adapter CLI preflight and all six test matrices:
 
 ```bash
 bash scripts/check_adapters.sh
 bash tests/gate_contract/run_all.sh
 bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
+bash tests/compatibility/run_all.sh
 bash tests/qualification/run_all.sh
 bash tests/qualification_series/run_all.sh
 ```
