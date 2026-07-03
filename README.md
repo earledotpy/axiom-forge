@@ -269,7 +269,7 @@ Expected final line:
 AXIOM_FORGE_CHECK: PASS
 ```
 
-This runs the adapter CLI preflight and all six test matrices:
+This runs the adapter CLI preflight and all seven test matrices:
 
 ```bash
 bash scripts/check_adapters.sh
@@ -277,6 +277,7 @@ bash tests/gate_contract/run_all.sh
 bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
 bash tests/compatibility/run_all.sh
+bash tests/adapter_evaluation/run_all.sh
 bash tests/qualification/run_all.sh
 bash tests/qualification_series/run_all.sh
 ```
