@@ -35,6 +35,9 @@ echo "== Compatibility Matrix =="
 bash tests/compatibility/run_all.sh
 
 echo
+echo "== Adapter Evaluation Matrix =="
+bash tests/adapter_evaluation/run_all.sh
+
 echo "== Qualification Matrix =="
 bash tests/qualification/run_all.sh
 
