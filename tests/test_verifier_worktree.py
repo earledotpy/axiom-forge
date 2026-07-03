@@ -15,7 +15,7 @@ class VerifierWorktreeTests(unittest.TestCase):
     def test_apply_patch_checks_before_applying(self):
         calls = []
 
-        def fake_run(command, cwd=None):
+        def fake_run(command, cwd=None, stdout=None, stderr=None):
             calls.append((command, cwd))
             return Completed()
 
@@ -54,7 +54,7 @@ class VerifierWorktreeTests(unittest.TestCase):
     def test_patch_check_failure_stops_before_apply(self):
         calls = []
 
-        def fake_run(command, cwd=None):
+        def fake_run(command, cwd=None, stdout=None, stderr=None):
             calls.append(command)
             return Completed(1)
 
@@ -106,7 +106,7 @@ class VerifierWorktreeTests(unittest.TestCase):
                 created.mkdir()
                 return str(created)
 
-            def fake_run(command, cwd=None):
+            def fake_run(command, cwd=None, stdout=None, stderr=None):
                 self.assertFalse(created.exists())
                 self.assertEqual(command[0:4], ["git", "worktree", "add", "--detach"])
                 return Completed()
@@ -118,6 +118,25 @@ class VerifierWorktreeTests(unittest.TestCase):
                     )
 
         self.assertEqual(worktree, created)
+
+    def test_create_detached_cli_prints_created_worktree(self):
+        with mock.patch.object(verifier_worktree, "create_detached_worktree") as fake_create:
+            fake_create.return_value = Path("verify-worktree")
+
+            with mock.patch("builtins.print") as fake_print:
+                status = verifier_worktree.main(
+                    [
+                        "create-detached",
+                        "--repo-root",
+                        "repo",
+                        "--base-sha",
+                        "abc123",
+                    ]
+                )
+
+        self.assertEqual(status, 0)
+        fake_create.assert_called_once_with(Path("repo"), "abc123")
+        fake_print.assert_called_once_with(Path("verify-worktree"))
 
 
 if __name__ == "__main__":

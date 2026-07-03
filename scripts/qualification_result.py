@@ -118,6 +118,18 @@ def load_results_for_adapter(root, adapter):
     return [load_result(str(p)) for p in sorted(rd.glob("*.json"))]
 
 
+def load_results_for_adapter_with_paths(root, adapter):
+    """Return (repo-relative source path, result) pairs for an adapter's committed results."""
+    rd = Path(root) / "qualification" / "results" / adapter
+    if not rd.is_dir():
+        return []
+    pairs = []
+    for p in sorted(rd.glob("*.json")):
+        source = str(p.relative_to(Path(root))).replace("\\", "/")
+        pairs.append((source, load_result(str(p))))
+    return pairs
+
+
 def check_results_clean(root, adapter):
     """Raise ValueError if qualification/results/<adapter>/ has uncommitted changes."""
     rel = f"qualification/results/{adapter}"
@@ -219,4 +231,73 @@ def evaluate(results):
         "pinned_configuration": pinned_configuration if active else None,
         "qualifying_results": [summary(result) for result in active],
         "resets": resets,
+    }
+
+
+def classify_evidence(result):
+    """Classify what one committed qualification result can prove under the
+    compatibility/trust split, without treating either axis as the other.
+
+    Compatibility evidence only requires that the captured-run/verified-patch
+    path completed; it does not require case coverage or complete identity.
+    Standard trust contribution is decided separately by series evaluation.
+    """
+    configuration = result.get("adapter_configuration")
+    identity = identity_for(configuration)
+    if identity is not None:
+        identity_status = "complete"
+    elif isinstance(configuration, dict):
+        identity_status = "incomplete"
+    else:
+        identity_status = "missing"
+
+    compatibility_evidence = (
+        result.get("run_validation") == "PASSED"
+        and result.get("patch_verification") == "PASSED"
+    )
+
+    return {
+        "run_id": result.get("run_id"),
+        "case": result.get("case"),
+        "compatibility_evidence": compatibility_evidence,
+        "identity_status": identity_status,
+        "failure_reason": result_failure_reason(result),
+    }
+
+
+def classify_series(root, adapter):
+    """Interpret an adapter's committed qualification results as historical
+    evidence under the compatibility/trust split.
+
+    Reuses evaluate() for the standard-trust decision rather than
+    reimplementing series/reset rules. Identifies the source result file for
+    every classified item; never fabricates or backfills missing identity.
+
+    Callers that need integrity against uncommitted or cherry-picked result
+    files (e.g. CLI report generation) should call check_results_clean()
+    first, as evaluate_qualification_series.py and qualification_report.py
+    already do.
+    """
+    loaded = load_results_for_adapter_with_paths(root, adapter)
+    results = [result for _, result in loaded]
+    outcome = evaluate(results)
+    active_keys = {
+        (item.get("run_id"), item.get("case")) for item in outcome["qualifying_results"]
+    }
+
+    items = []
+    for source, result in loaded:
+        classification = classify_evidence(result)
+        classification["source"] = source
+        classification["standard_trust_contribution"] = (
+            classification["run_id"],
+            classification["case"],
+        ) in active_keys
+        items.append(classification)
+
+    return {
+        "adapter": adapter,
+        "standard_trust_status": outcome["status"],
+        "standard_trust_reason": outcome["reason"],
+        "items": items,
     }

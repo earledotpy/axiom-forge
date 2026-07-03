@@ -64,6 +64,22 @@ python scripts/qualification_report.py --adapter <adapter>
 
 The snippet is printed to stdout for operator review before any doc is updated.
 
+Interpret an adapter's committed qualification results as historical evidence
+under the compatibility/trust split, without requiring a QUALIFIED series and
+without touching `runs/`:
+
+```bash
+python scripts/qualification_report.py --adapter <adapter> --evidence-reuse
+```
+
+For each committed result, the report cites its source file under
+`qualification/results/<adapter>/` and states, independently, whether it
+proves candidate compatibility (the captured-run/verified-patch path
+completed) and whether it currently contributes to the adapter's standard
+trust series. A result can prove compatibility without contributing to trust
+(for example, a completed run whose task-specific acceptance failed).
+Incomplete or missing identity evidence is reported as-is, never filled in.
+
 ## Candidate Compatibility
 
 A candidate adapter can be checked without running the full standard adapter
@@ -125,12 +141,12 @@ scripts/
   compatibility_result.py        # candidate compatibility result library
   write_compatibility_result.py  # CLI: write a compatibility result
   qualification_case.py          # qualification case loading library
-  qualification_result.py        # qualification result building and series evaluation
+  qualification_result.py        # qualification result building, series evaluation, and evidence-reuse classification
   write_qualification_result.py  # CLI: write a qualification result
   evaluate_qualification_series.py  # CLI: evaluate a result series
   adapter_identity.py            # adapter identity validation and CLI provenance capture
   capture_cli_provenance.py      # CLI: capture CLI provenance (delegates to adapter_identity)
-  qualification_report.py        # library + CLI: render Markdown qualification snippets
+  qualification_report.py        # library + CLI: render Markdown qualification and evidence-reuse snippets
 
 tasks/
   *.task.md                      # operator-authored tasks for real agent runs

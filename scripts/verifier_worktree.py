@@ -18,8 +18,8 @@ class VerifierError(Exception):
         self.returncode = returncode
 
 
-def run_command(command, *, cwd=None):
-    return subprocess.run(command, cwd=cwd)
+def run_command(command, *, cwd=None, stdout=None, stderr=None):
+    return subprocess.run(command, cwd=cwd, stdout=stdout, stderr=stderr)
 
 
 def create_detached_worktree(repo_root, base_sha):
@@ -29,6 +29,8 @@ def create_detached_worktree(repo_root, base_sha):
     completed = run_command(
         ["git", "worktree", "add", "--detach", str(path), base_sha],
         cwd=repo_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     if completed.returncode != 0:
         raise VerifierError(VERIFY_WORKTREE_CREATE_FAILED)
@@ -89,7 +91,7 @@ def verify_detached(repo_root, script_dir, base_sha, patch, config, out):
             remove_worktree(repo_root, worktree)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -101,6 +103,10 @@ def main():
     verify_parser.add_argument("--config", required=True)
     verify_parser.add_argument("--out", required=True)
 
+    create_parser = subparsers.add_parser("create-detached")
+    create_parser.add_argument("--repo-root", required=True)
+    create_parser.add_argument("--base-sha", required=True)
+
     apply_parser = subparsers.add_parser("apply-patch")
     apply_parser.add_argument("--worktree", required=True)
     apply_parser.add_argument("--patch", required=True)
@@ -111,7 +117,7 @@ def main():
     target_parser.add_argument("--worktree", required=True)
     target_parser.add_argument("--out", required=True)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.command == "verify-detached":
@@ -123,6 +129,9 @@ def main():
                 Path(args.config),
                 Path(args.out),
             )
+        elif args.command == "create-detached":
+            worktree = create_detached_worktree(Path(args.repo_root), args.base_sha)
+            print(worktree)
         elif args.command == "apply-patch":
             apply_patch(Path(args.worktree), Path(args.patch))
         elif args.command == "verify-target":

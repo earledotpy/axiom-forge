@@ -9,9 +9,19 @@ import json
 import sys
 
 try:
-    from qualification_result import check_results_clean, evaluate, load_results_for_adapter
+    from qualification_result import (
+        check_results_clean,
+        classify_series,
+        evaluate,
+        load_results_for_adapter,
+    )
 except ImportError:
-    from scripts.qualification_result import check_results_clean, evaluate, load_results_for_adapter
+    from scripts.qualification_result import (
+        check_results_clean,
+        classify_series,
+        evaluate,
+        load_results_for_adapter,
+    )
 
 
 def render_qualification_snippet(outcome):
@@ -81,19 +91,75 @@ def _spec_cell(spec):
     return f"`{path}` `{sha}`"
 
 
+def render_evidence_reuse_snippet(classification):
+    """Return a Markdown snippet interpreting an adapter's committed
+    qualification results as historical evidence under the
+    compatibility/trust split.
+
+    Unlike render_qualification_snippet(), this covers every committed
+    result for the adapter, not only a QUALIFIED series, and cites each
+    result's source file so an operator can trace the interpretation back to
+    the evidence that produced it.
+    """
+    adapter = classification.get("adapter") or ""
+    status = classification.get("standard_trust_status")
+    reason = classification.get("standard_trust_reason")
+    items = classification.get("items") or []
+
+    lines = []
+    lines.append(f"## {adapter} Historical Evidence Reuse")
+    lines.append("")
+    trust_line = f"Standard trust status: {status}"
+    if reason:
+        trust_line += f" ({reason})"
+    lines.append(trust_line)
+    lines.append("")
+
+    header = (
+        "| Source | Run ID | Case | Compatibility evidence | "
+        "Standard trust contribution | Identity |"
+    )
+    separator = "| --- | --- | --- | --- | --- | --- |"
+    lines.append(header)
+    lines.append(separator)
+
+    for item in items:
+        compatibility = "YES" if item.get("compatibility_evidence") else "NO"
+        contribution = "YES" if item.get("standard_trust_contribution") else "NO"
+        lines.append(
+            f"| `{item.get('source', '')}` | `{item.get('run_id', '')}` | "
+            f"{item.get('case', '')} | {compatibility} | {contribution} | "
+            f"{item.get('identity_status', '')} |"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Render a reviewable Markdown snippet from qualification result files."
     )
     parser.add_argument("--adapter", required=True, help="adapter name")
     parser.add_argument("--root", default=".", help="repository root (default: .)")
+    parser.add_argument(
+        "--evidence-reuse",
+        action="store_true",
+        help=(
+            "render a historical evidence reuse report covering every "
+            "committed result, instead of the QUALIFIED-only snippet"
+        ),
+    )
     args = parser.parse_args()
 
     try:
         check_results_clean(args.root, args.adapter)
-        loaded = load_results_for_adapter(args.root, args.adapter)
-        outcome = evaluate(loaded)
-        snippet = render_qualification_snippet(outcome)
+        if args.evidence_reuse:
+            classification = classify_series(args.root, args.adapter)
+            snippet = render_evidence_reuse_snippet(classification)
+        else:
+            loaded = load_results_for_adapter(args.root, args.adapter)
+            outcome = evaluate(loaded)
+            snippet = render_qualification_snippet(outcome)
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

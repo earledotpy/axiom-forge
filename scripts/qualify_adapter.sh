@@ -122,20 +122,37 @@ while IFS=$'\t' read -r _ _ path; do
 done < <(git apply --numstat "$PATCH")
 
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RUN_DIR/record.json" base_sha)"
-VERIFY_WT="$(mktemp -d)"
-rmdir "$VERIFY_WT"
-git worktree add --detach "$VERIFY_WT" "$BASE_SHA" >/dev/null || {
+if ! VERIFY_WT="$(
+  python "$SCRIPT_DIR/verifier_worktree.py" create-detached \
+    --repo-root "$ROOT" \
+    --base-sha "$BASE_SHA"
+)"; then
   write_result "FAILED" "acceptance" "acceptance_worktree_create_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
   die "qualification_acceptance_worktree_create_failed"
-}
-git -C "$VERIFY_WT" apply --check --whitespace=error "$PATCH" || {
-  write_result "FAILED" "acceptance" "acceptance_patch_check_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
-  die "qualification_acceptance_patch_check_failed"
-}
-git -C "$VERIFY_WT" apply --whitespace=error "$PATCH" || {
-  write_result "FAILED" "acceptance" "acceptance_patch_apply_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
-  die "qualification_acceptance_patch_apply_failed"
-}
+fi
+
+set +e
+python "$SCRIPT_DIR/verifier_worktree.py" apply-patch \
+  --worktree "$VERIFY_WT" \
+  --patch "$PATCH"
+APPLY_STATUS=$?
+set -e
+
+case "$APPLY_STATUS" in
+  0) ;;
+  20)
+    write_result "FAILED" "acceptance" "acceptance_patch_check_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
+    die "qualification_acceptance_patch_check_failed"
+    ;;
+  21)
+    write_result "FAILED" "acceptance" "acceptance_patch_apply_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
+    die "qualification_acceptance_patch_apply_failed"
+    ;;
+  *)
+    write_result "FAILED" "acceptance" "acceptance_patch_apply_failed" "PASSED" "PASSED" "PASSED" "NOT_RUN"
+    die "qualification_acceptance_patch_apply_failed"
+    ;;
+esac
 if ! bash "$ACCEPTANCE_SCRIPT" "$VERIFY_WT"; then
   write_result "FAILED" "acceptance" "acceptance_failed" "PASSED" "PASSED" "PASSED" "FAILED"
   die "qualification_acceptance_failed"
