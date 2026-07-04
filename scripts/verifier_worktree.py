@@ -80,12 +80,33 @@ def verify_target(script_dir, config, worktree, out):
         raise VerifierError(VERIFICATION_FAILED)
 
 
-def verify_detached(repo_root, script_dir, base_sha, patch, config, out):
+def verify_target_mode(script_dir, config, worktree, out):
+    completed = run_command(
+        [
+            sys.executable,
+            str(Path(script_dir) / "target_verify.py"),
+            "run",
+            "--config",
+            str(config),
+            "--worktree",
+            str(worktree),
+            "--out",
+            str(out),
+        ]
+    )
+    if completed.returncode != 0:
+        raise VerifierError(VERIFICATION_FAILED)
+
+
+def verify_detached(repo_root, script_dir, base_sha, patch, config, out, verify_mode="forge-local"):
     worktree = None
     try:
         worktree = create_detached_worktree(repo_root, base_sha)
         apply_patch(worktree, patch)
-        verify_target(script_dir, config, worktree, out)
+        if verify_mode == "target":
+            verify_target_mode(script_dir, config, worktree, out)
+        else:
+            verify_target(script_dir, config, worktree, out)
     finally:
         if worktree is not None:
             remove_worktree(repo_root, worktree)
@@ -102,6 +123,7 @@ def main(argv=None):
     verify_parser.add_argument("--patch", required=True)
     verify_parser.add_argument("--config", required=True)
     verify_parser.add_argument("--out", required=True)
+    verify_parser.add_argument("--verify-mode", choices=("forge-local", "target"), default="forge-local")
 
     create_parser = subparsers.add_parser("create-detached")
     create_parser.add_argument("--repo-root", required=True)
@@ -128,6 +150,7 @@ def main(argv=None):
                 Path(args.patch),
                 Path(args.config),
                 Path(args.out),
+                args.verify_mode,
             )
         elif args.command == "create-detached":
             worktree = create_detached_worktree(Path(args.repo_root), args.base_sha)

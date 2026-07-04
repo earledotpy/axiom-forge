@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+
+from target_preflight import PreflightFailure, is_inside, load_primary_target, normalize_path
+
+
+class TargetVerifyFailure(Exception):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def load_record(path: Path) -> dict:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        raise TargetVerifyFailure("target_record_malformed")
+    if not isinstance(record, dict):
+        raise TargetVerifyFailure("target_record_malformed")
+    return record
+
+
+def require_string(record: dict, key: str, reason: str) -> str:
+    value = record.get(key)
+    if not isinstance(value, str) or not value:
+        raise TargetVerifyFailure(reason)
+    return value
+
+
+def configured_target_path(config_path: Path, target: dict) -> Path:
+    path = Path(target["repo_path"]).expanduser()
+    if not path.is_absolute():
+        path = config_path.parent / path
+    return path.resolve()
+
+
+def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> dict:
+    try:
+        target = load_primary_target(config_path)
+    except PreflightFailure as exc:
+        raise TargetVerifyFailure(exc.reason)
+
+    record = load_record(record_path)
+    run_mode = record.get("run_mode", "forge-local")
+    if run_mode != "target":
+        raise TargetVerifyFailure("target_flag_requires_target_run")
+
+    target_name = require_string(record, "target_name", "missing_target_name")
+    target_repo = require_string(record, "target_repo", "missing_target_repo")
+    target_base_branch = require_string(record, "target_base_branch", "missing_target_base_branch")
+    target_base_sha = require_string(record, "target_base_sha", "missing_target_base_sha")
+    target_remote_url = require_string(record, "target_remote_url", "missing_target_remote_url")
+    base_sha = require_string(record, "base_sha", "missing_base_sha")
+
+    if target_base_sha != base_sha:
+        raise TargetVerifyFailure("target_base_sha_mismatch")
+    if target_name != target["name"]:
+        raise TargetVerifyFailure("target_name_mismatch")
+    if target_base_branch != target["expected_base_branch"]:
+        raise TargetVerifyFailure("target_base_branch_mismatch")
+    if target_remote_url != target["expected_remote_url"]:
+        raise TargetVerifyFailure("target_remote_mismatch")
+
+    configured_repo = configured_target_path(config_path, target)
+    recorded_repo = Path(target_repo).expanduser()
+    if not recorded_repo.is_absolute():
+        recorded_repo = (record_path.parent / recorded_repo).resolve()
+    recorded_repo = recorded_repo.resolve()
+
+    if normalize_path(recorded_repo) != normalize_path(configured_repo):
+        raise TargetVerifyFailure("target_repo_mismatch")
+
+    forge_root = forge_root.resolve()
+    if is_inside(recorded_repo, forge_root):
+        raise TargetVerifyFailure("target_repo_inside_forge_checkout")
+
+    if not recorded_repo.exists():
+        raise TargetVerifyFailure("target_repo_path_missing")
+
+    remote = subprocess.run(
+        ["git", "-C", str(recorded_repo), "remote", "get-url", "origin"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if remote.returncode != 0:
+        raise TargetVerifyFailure("target_remote_unavailable")
+    if remote.stdout.strip() != target_remote_url:
+        raise TargetVerifyFailure("target_remote_mismatch")
+
+    commit = subprocess.run(
+        ["git", "-C", str(recorded_repo), "cat-file", "-e", f"{base_sha}^{{commit}}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if commit.returncode != 0:
+        raise TargetVerifyFailure("target_base_sha_not_found")
+
+    return {"repo_root": str(recorded_repo), "base_sha": base_sha}
+
+
+def run_target_verification(config_path: Path, worktree: Path, out: Path) -> int:
+    try:
+        target = load_primary_target(config_path)
+        command = target["verify"]["command"]
+        timeout = target["verify"]["timeout_seconds"]
+    except Exception as exc:
+        result = {
+            "schema_version": 1,
+            "status": "FAIL",
+            "reason": f"target_verification_config_missing: {exc}",
+            "timestamp_utc": utc_now(),
+            "worktree": str(worktree),
+            "check": {},
+        }
+        out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        print("VERIFY_TARGET_MODE: FAIL")
+        print("Reason: target_verification_config_missing")
+        return 1
+
+    result = {
+        "schema_version": 1,
+        "status": "FAIL",
+        "timestamp_utc": utc_now(),
+        "worktree": str(worktree),
+        "check": {
+            "command": command,
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+        },
+    }
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        result["check"]["returncode"] = completed.returncode
+        result["check"]["stdout"] = completed.stdout
+        result["check"]["stderr"] = completed.stderr
+        if completed.returncode == 0:
+            result["status"] = "PASS"
+        else:
+            result["reason"] = "target_verification_failed"
+    except subprocess.TimeoutExpired as exc:
+        result["reason"] = "target_verification_timeout"
+        result["check"]["stdout"] = exc.stdout or ""
+        result["check"]["stderr"] = exc.stderr or ""
+    except Exception as exc:
+        result["reason"] = "target_verification_error"
+        result["check"]["stderr"] = str(exc)
+
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(f"VERIFY_TARGET_MODE: {result['status']}")
+    if result["status"] == "PASS":
+        return 0
+    print(f"Reason: {result.get('reason', 'target_verification_failed')}")
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    context_parser = subparsers.add_parser("validate-context")
+    context_parser.add_argument("--record", required=True)
+    context_parser.add_argument("--config", required=True)
+    context_parser.add_argument("--forge-root", required=True)
+
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("--config", required=True)
+    run_parser.add_argument("--worktree", required=True)
+    run_parser.add_argument("--out", required=True)
+
+    args = parser.parse_args(argv)
+
+    if args.command == "validate-context":
+        try:
+            context = validate_context(
+                Path(args.record),
+                Path(args.config).resolve(),
+                Path(args.forge_root).resolve(),
+            )
+        except TargetVerifyFailure as exc:
+            print(exc.reason)
+            return 1
+        print(f"repo_root={context['repo_root']}")
+        print(f"base_sha={context['base_sha']}")
+        return 0
+
+    if args.command == "run":
+        return run_target_verification(
+            Path(args.config).resolve(),
+            Path(args.worktree).resolve(),
+            Path(args.out),
+        )
+
+    raise AssertionError(f"unknown command: {args.command}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

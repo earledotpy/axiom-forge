@@ -31,6 +31,10 @@ echo "== Runner Matrix =="
 bash tests/runner/run_all.sh
 
 echo
+echo "== Target Verification Matrix =="
+bash tests/target_verify/run_all.sh
+
+echo
 echo "== Compatibility Matrix =="
 bash tests/compatibility/run_all.sh
 
