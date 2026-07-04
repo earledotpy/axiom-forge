@@ -6,6 +6,9 @@ cd "$ROOT"
 
 PASS_COUNT=0
 FAIL_COUNT=0
+TMPDIR="$(mktemp -d)"
+GATE_BACKUP="$(mktemp)"
+cp gate.toml "$GATE_BACKUP"
 
 say() {
   printf "\n== %s ==\n" "$1"
@@ -21,10 +24,32 @@ fail() {
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
+cleanup() {
+  cp "$GATE_BACKUP" gate.toml
+  rm -f "$GATE_BACKUP"
+  rm -rf "$TMPDIR"
+}
+trap cleanup EXIT
+
 cleanup_branch() {
   local run_id="$1"
   git worktree prune >/dev/null 2>&1 || true
   git branch -D "gate/$run_id" >/dev/null 2>&1 || true
+}
+
+cleanup_target_branch() {
+  local repo="$1"
+  local run_id="$2"
+  git -C "$repo" worktree prune >/dev/null 2>&1 || true
+  git -C "$repo" branch -D "gate/$run_id" >/dev/null 2>&1 || true
+}
+
+path_for_toml() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s\n' "$1"
+  fi
 }
 
 make_good_run() {
@@ -61,6 +86,109 @@ PATCH
   "run_status": "COMPLETED"
 }
 JSON
+}
+
+
+make_target_repo() {
+  local repo="$1"
+
+  git init -q -b main "$repo"
+  git -C "$repo" config user.email "test@example.invalid"
+  git -C "$repo" config user.name "Axiom Test"
+  git -C "$repo" remote add origin "https://example.test/target.git"
+  mkdir -p "$repo/app"
+  cat > "$repo/app/target.py" <<'PY'
+def answer():
+    return "before"
+PY
+  cat > "$repo/check_target.py" <<'PY'
+from pathlib import Path
+
+text = Path("app/target.py").read_text(encoding="utf-8")
+raise SystemExit(0 if 'return "after"' in text else 1)
+PY
+  git -C "$repo" add app/target.py check_target.py
+  git -C "$repo" commit -q -m "initial target"
+}
+
+write_target_gate_config() {
+  local repo
+  repo="$(path_for_toml "$1")"
+  local command="${2:-python check_target.py}"
+
+  cat > gate.toml <<TOML
+[project]
+name = "axiom-forge"
+default_base = "main"
+
+[target.primary]
+name = "test-target"
+repo_path = "$repo"
+expected_base_branch = "main"
+expected_remote_url = "https://example.test/target.git"
+
+[target.primary.verify]
+command = [$command]
+timeout_seconds = 120
+
+[promotion]
+branch_prefix = "gate/"
+patch_file = "patch.diff"
+record_file = "record.json"
+promotion_file = "promotion.json"
+TOML
+}
+
+write_target_run() {
+  local run_id="$1"
+  local repo="$2"
+  local base_sha
+  local patch_sha
+
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+  mkdir -p "runs/$run_id"
+
+  cat > "runs/$run_id/patch.diff" <<'PATCH'
+diff --git a/app/target.py b/app/target.py
+--- a/app/target.py
++++ b/app/target.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return "before"
++    return "after"
+PATCH
+  patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
+
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "$base_sha" "$patch_sha" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+record_path, run_id, repo, base_sha, patch_sha = sys.argv[1:]
+record = {
+    "schema_version": 2,
+    "run_id": run_id,
+    "agent": "test-agent",
+    "run_mode": "target",
+    "target_repo": str(Path(repo).resolve()),
+    "target_name": "test-target",
+    "target_base_branch": "main",
+    "target_base_sha": base_sha,
+    "target_remote_url": "https://example.test/target.git",
+    "base_sha": base_sha,
+    "task_file": "task.md",
+    "patch_file": "patch.diff",
+    "patch_sha256": patch_sha,
+    "cli_command": "test-agent",
+    "cli_path": "/bin/test-agent",
+    "cli_version": "test",
+    "run_status": "COMPLETED",
+    "failure_reason": None,
+    "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+Path(record_path).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
 }
 
 expect_fail() {
@@ -349,6 +477,114 @@ else
 fi
 
 cleanup_branch "$RUN_ID"
+
+
+say "Target-mode promotion"
+
+TARGET_REPO="$TMPDIR/target"
+make_target_repo "$TARGET_REPO"
+write_target_gate_config "$TARGET_REPO" '"python", "check_target.py"'
+TARGET_MAIN_BEFORE="$(git -C "$TARGET_REPO" rev-parse main)"
+
+RUN_ID="target-flag-required"
+write_target_run "$RUN_ID" "$TARGET_REPO"
+expect_fail "T12_target_run_requires_explicit_flag" \
+  bash scripts/promote.sh "runs/$RUN_ID"
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
+
+RUN_ID="target-operator-mismatch"
+write_target_run "$RUN_ID" "$TARGET_REPO"
+expect_fail "T13_target_operator_mismatch_fails" \
+  bash -c "printf 'wrong-id\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
+
+RUN_ID="target-existing-branch"
+write_target_run "$RUN_ID" "$TARGET_REPO"
+git -C "$TARGET_REPO" branch "gate/$RUN_ID" "$TARGET_MAIN_BEFORE"
+expect_fail "T14_target_existing_gate_branch_fails" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
+
+RUN_ID="target-stale-base"
+write_target_run "$RUN_ID" "$TARGET_REPO"
+cat >> "$TARGET_REPO/app/target.py" <<'PY'
+
+# new base commit
+PY
+git -C "$TARGET_REPO" add app/target.py
+git -C "$TARGET_REPO" commit -q -m "advance target base"
+expect_fail "T15_target_stale_base_fails" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+if grep -q '"reason": "stale_base_sha"' "runs/$RUN_ID/promotion.json"; then
+  pass "T15a_target_stale_base_records_failure_reason"
+else
+  fail "T15a_target_stale_base_records_failure_reason"
+fi
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
+
+TARGET_REPO="$TMPDIR/target-after-stale"
+make_target_repo "$TARGET_REPO"
+write_target_gate_config "$TARGET_REPO" '"python", "check_target.py"'
+TARGET_MAIN_BEFORE="$(git -C "$TARGET_REPO" rev-parse main)"
+
+RUN_ID="target-failed-verification"
+write_target_gate_config "$TARGET_REPO" '"python", "-c", "raise SystemExit(7)"'
+write_target_run "$RUN_ID" "$TARGET_REPO"
+expect_fail "T16_target_failed_verification_fails_closed" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+if grep -q '"reason": "pre_promotion_verification_failed"' "runs/$RUN_ID/promotion.json"; then
+  pass "T16a_target_failed_verification_records_failure_reason"
+else
+  fail "T16a_target_failed_verification_records_failure_reason"
+fi
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
+write_target_gate_config "$TARGET_REPO" '"python", "check_target.py"'
+
+RUN_ID="target-success"
+write_target_run "$RUN_ID" "$TARGET_REPO"
+expect_pass "T17_target_success_creates_target_gate_branch" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+
+if git -C "$TARGET_REPO" show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
+  pass "T17a_target_branch_exists_in_target_repo"
+else
+  fail "T17a_target_branch_exists_in_target_repo"
+fi
+
+if git show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
+  fail "T17b_target_branch_not_created_in_forge_repo"
+else
+  pass "T17b_target_branch_not_created_in_forge_repo"
+fi
+
+if [[ "$(git -C "$TARGET_REPO" rev-parse main)" == "$TARGET_MAIN_BEFORE" ]]; then
+  pass "T17c_target_main_unchanged"
+else
+  fail "T17c_target_main_unchanged"
+fi
+
+if python - "runs/$RUN_ID/promotion.json" "$TARGET_REPO" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["status"] == "PROMOTED"
+assert record["target_name"] == "test-target"
+assert Path(record["target_repo"]).resolve() == Path(sys.argv[2]).resolve()
+assert record["target_base_branch"] == "main"
+assert record["target_remote_url"] == "https://example.test/target.git"
+assert record["branch"] == "gate/target-success"
+assert record["promotion_commit"]
+PY
+then
+  pass "T17d_target_success_records_target_promotion_json"
+else
+  fail "T17d_target_success_records_target_promotion_json"
+  cat "runs/$RUN_ID/promotion.json" >&2
+fi
+
+cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
 
 say "Summary"
 

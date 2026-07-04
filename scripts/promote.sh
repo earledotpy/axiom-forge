@@ -7,7 +7,13 @@ source "$SCRIPT_DIR/common.sh"
 need_cmd git
 need_cmd python
 
-[[ $# -eq 1 ]] || die "usage: promote.sh <run_dir>"
+TARGET_MODE=0
+if [[ $# -eq 2 && "$1" == "--target" ]]; then
+  TARGET_MODE=1
+  shift
+fi
+
+[[ $# -eq 1 ]] || die "usage: promote.sh [--target] <run_dir>"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not_inside_git_repo"
 cd "$ROOT"
@@ -29,6 +35,48 @@ BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missin
 DEFAULT_BASE="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" project.default_base)" || die "malformed_gate_toml"
 BRANCH_PREFIX="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" promotion.branch_prefix)" || die "malformed_gate_toml"
 BRANCH="${BRANCH_PREFIX}${RUN_ID}"
+RUN_MODE="$(python - "$RECORD" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+print(record.get("run_mode", "forge-local"))
+PY
+)" || die "invalid_run_mode"
+
+TARGET_REPO=""
+TARGET_NAME=""
+TARGET_BASE_BRANCH=""
+TARGET_REMOTE_URL=""
+PROMOTION_REPO="$ROOT"
+VERIFY_FLAG=()
+POST_VERIFY_MODE="forge-local"
+
+if [[ "$TARGET_MODE" -eq 0 && "$RUN_MODE" == "target" ]]; then
+  die "target_mode_requires_explicit_flag"
+fi
+
+if [[ "$TARGET_MODE" -eq 1 && "$RUN_MODE" != "target" ]]; then
+  die "target_flag_requires_target_run"
+fi
+
+if [[ "$TARGET_MODE" -eq 1 ]]; then
+  TARGET_CONTEXT="$(
+    python "$SCRIPT_DIR/target_verify.py" validate-context \
+      --record "$RECORD" \
+      --config "$CONFIG" \
+      --forge-root "$ROOT"
+  )" || die "$TARGET_CONTEXT"
+
+  TARGET_REPO="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
+  BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
+  TARGET_NAME="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_name)" || die "missing_target_name"
+  TARGET_BASE_BRANCH="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_base_branch)" || die "missing_target_base_branch"
+  TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_remote_url)" || die "missing_target_remote_url"
+  PROMOTION_REPO="$TARGET_REPO"
+  VERIFY_FLAG=(--target)
+  POST_VERIFY_MODE="target"
+fi
 
 GATE_WT=""
 BRANCH_CREATED=0
@@ -45,16 +93,20 @@ record_status() {
     --branch "$BRANCH" \
     --base-sha "$BASE_SHA" \
     --promotion-commit "$PROMOTION_COMMIT" \
+    --target-repo "$TARGET_REPO" \
+    --target-name "$TARGET_NAME" \
+    --target-base-branch "$TARGET_BASE_BRANCH" \
+    --target-remote-url "$TARGET_REMOTE_URL" \
     >/dev/null 2>&1 || true
 }
 
 cleanup_failed() {
   if [[ -n "${GATE_WT:-}" && -d "$GATE_WT" ]]; then
-    git worktree remove -f "$GATE_WT" >/dev/null 2>&1 || true
+    git -C "$PROMOTION_REPO" worktree remove -f "$GATE_WT" >/dev/null 2>&1 || true
   fi
 
   if [[ "$BRANCH_CREATED" == "1" ]]; then
-    git branch -D "$BRANCH" >/dev/null 2>&1 || true
+    git -C "$PROMOTION_REPO" branch -D "$BRANCH" >/dev/null 2>&1 || true
   fi
 }
 
@@ -66,27 +118,33 @@ fail_closed() {
   exit 1
 }
 
-if [[ -n "$(git status --porcelain)" ]]; then
+if [[ -n "$(git -C "$PROMOTION_REPO" status --porcelain)" ]]; then
   fail_closed "target_repo_dirty"
 fi
 
-CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
+if [[ "$TARGET_MODE" -eq 1 ]]; then
+  CURRENT_TARGET_BRANCH="$(git -C "$PROMOTION_REPO" branch --show-current)" || fail_closed "target_branch_unavailable"
+  [[ "$CURRENT_TARGET_BRANCH" == "$TARGET_BASE_BRANCH" ]] || fail_closed "target_not_on_expected_base_branch"
+  CURRENT_BASE_SHA="$(git -C "$PROMOTION_REPO" rev-parse "${TARGET_BASE_BRANCH}^{commit}")" || fail_closed "target_base_sha_unresolved"
+else
+  CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
+fi
 [[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
 
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || fail_closed "invalid_gate_branch_name"
 
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+if git -C "$PROMOTION_REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
   fail_closed "gate_branch_already_exists"
 fi
 
-bash "$SCRIPT_DIR/verify_patch.sh" "$RUN_DIR" || fail_closed "pre_promotion_verification_failed"
+bash "$SCRIPT_DIR/verify_patch.sh" "${VERIFY_FLAG[@]}" "$RUN_DIR" || fail_closed "pre_promotion_verification_failed"
 
 bash "$SCRIPT_DIR/require_operator_approval.sh" "$RUN_ID" || fail_closed "operator_approval_failed"
 
 GATE_WT="$(mktemp -d)"
 rmdir "$GATE_WT"
 
-git worktree add -b "$BRANCH" "$GATE_WT" "$BASE_SHA" >/dev/null || fail_closed "gate_worktree_create_failed"
+git -C "$PROMOTION_REPO" worktree add -b "$BRANCH" "$GATE_WT" "$BASE_SHA" >/dev/null || fail_closed "gate_worktree_create_failed"
 BRANCH_CREATED=1
 
 set +e
@@ -112,16 +170,24 @@ git -C "$GATE_WT" commit \
 
 PROMOTION_COMMIT="$(git -C "$GATE_WT" rev-parse HEAD)" || fail_closed "promotion_commit_lookup_failed"
 
-python "$SCRIPT_DIR/verifier_worktree.py" verify-target \
-  --script-dir "$SCRIPT_DIR" \
-  --config "$CONFIG" \
-  --worktree "$GATE_WT" \
-  --out "$RUN_DIR/post_verify.json" \
-  || fail_closed "post_promotion_verification_failed"
+if [[ "$POST_VERIFY_MODE" == "target" ]]; then
+  python "$SCRIPT_DIR/target_verify.py" run \
+    --config "$CONFIG" \
+    --worktree "$GATE_WT" \
+    --out "$RUN_DIR/post_verify.json" \
+    || fail_closed "post_promotion_verification_failed"
+else
+  python "$SCRIPT_DIR/verifier_worktree.py" verify-target \
+    --script-dir "$SCRIPT_DIR" \
+    --config "$CONFIG" \
+    --worktree "$GATE_WT" \
+    --out "$RUN_DIR/post_verify.json" \
+    || fail_closed "post_promotion_verification_failed"
+fi
 
 record_status "PROMOTED" ""
 
-git worktree remove -f "$GATE_WT" >/dev/null 2>&1 || true
+git -C "$PROMOTION_REPO" worktree remove -f "$GATE_WT" >/dev/null 2>&1 || true
 
 echo "PROMOTED: $RUN_ID -> $BRANCH"
 echo "COMMIT: $PROMOTION_COMMIT"
