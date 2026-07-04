@@ -16,6 +16,12 @@ parser.add_argument("--failure-reason", default="")
 parser.add_argument("--cli-command", default="")
 parser.add_argument("--cli-path", default="")
 parser.add_argument("--cli-version", default="")
+parser.add_argument("--run-mode", default="forge-local")
+parser.add_argument("--target-repo", default=".")
+parser.add_argument("--target-name", default="")
+parser.add_argument("--target-base-branch", default="")
+parser.add_argument("--target-base-sha", default="")
+parser.add_argument("--target-remote-url", default="")
 args = parser.parse_args()
 
 write_record(
@@ -31,4 +37,10 @@ write_record(
     cli_command=args.cli_command,
     cli_path=args.cli_path,
     cli_version=args.cli_version,
+    run_mode=args.run_mode,
+    target_repo=args.target_repo,
+    target_name=args.target_name,
+    target_base_branch=args.target_base_branch,
+    target_base_sha=args.target_base_sha,
+    target_remote_url=args.target_remote_url,
 )

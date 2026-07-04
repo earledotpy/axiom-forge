@@ -7,7 +7,13 @@ source "$SCRIPT_DIR/common.sh"
 need_cmd git
 need_cmd python
 
-[[ $# -eq 2 ]] || die "usage: run_agent_task.sh <agent_name> <task_file>"
+TARGET_MODE=0
+if [[ $# -eq 3 && "$1" == "--target" ]]; then
+  TARGET_MODE=1
+  shift
+fi
+
+[[ $# -eq 2 ]] || die "usage: run_agent_task.sh [--target] <agent_name> <task_file>"
 
 AGENT_NAME="$1"
 TASK_FILE="$2"
@@ -19,7 +25,7 @@ cd "$ROOT"
 
 [[ -f "$TASK_FILE" ]] || die "missing_task_file"
 
-if [[ -n "$(git status --porcelain)" ]]; then
+if [[ "$TARGET_MODE" -eq 0 && -n "$(git status --porcelain)" ]]; then
   die "target_repo_dirty"
 fi
 
@@ -31,13 +37,22 @@ print(datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f"))
 PYID
 )"
 RUN_DIR="$ROOT/runs/$RUN_ID"
-BASE_SHA="$(git rev-parse HEAD)"
+BASE_SHA=""
 AGENT_WT="$ROOT/../agent-$RUN_ID"
 PATCH_SHA=""
 CLI_PROVENANCE_FILE="$RUN_DIR/cli-provenance.json"
 CLI_COMMAND=""
 CLI_PATH=""
 CLI_VERSION=""
+RUN_MODE="forge-local"
+WORKTREE_REPO="$ROOT"
+TARGET_NAME=""
+TARGET_REPO="."
+TARGET_BASE_BRANCH=""
+TARGET_BASE_SHA=""
+TARGET_REMOTE_URL=""
+TARGET_PREFLIGHT_JSON="$RUN_DIR/target-preflight.json"
+TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
 
 mkdir -p "$RUN_DIR"
 cp "$TASK_FILE" "$RUN_DIR/task.md"
@@ -60,6 +75,12 @@ write_record() {
     --cli-command "$CLI_COMMAND" \
     --cli-path "$CLI_PATH" \
     --cli-version "$CLI_VERSION" \
+    --run-mode "$RUN_MODE" \
+    --target-repo "$TARGET_REPO" \
+    --target-name "$TARGET_NAME" \
+    --target-base-branch "$TARGET_BASE_BRANCH" \
+    --target-base-sha "$TARGET_BASE_SHA" \
+    --target-remote-url "$TARGET_REMOTE_URL" \
     --failure-reason "$reason"
 }
 
@@ -74,7 +95,7 @@ read_cli_provenance() {
 
 cleanup() {
   if [[ -d "$AGENT_WT" ]]; then
-    git worktree remove -f "$AGENT_WT" >/dev/null 2>&1 || true
+    git -C "$WORKTREE_REPO" worktree remove -f "$AGENT_WT" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -87,33 +108,70 @@ fail_run() {
   exit 1
 }
 
+if [[ "$TARGET_MODE" -eq 1 ]]; then
+  RUN_MODE="target"
+  if python "$SCRIPT_DIR/target_preflight.py" \
+    --config "$ROOT/gate.toml" \
+    --forge-root "$ROOT" \
+    --json-output "$TARGET_PREFLIGHT_JSON" \
+    >"$TARGET_PREFLIGHT_OUT" 2>>"$RUN_DIR/stderr.log"; then
+    cat "$TARGET_PREFLIGHT_OUT" >>"$RUN_DIR/stdout.log"
+  else
+    cat "$TARGET_PREFLIGHT_OUT" >>"$RUN_DIR/stdout.log"
+    PREFLIGHT_REASON="$(sed -n 's/^Reason: //p' "$TARGET_PREFLIGHT_OUT" | tail -n 1)"
+    fail_run "${PREFLIGHT_REASON:-target_preflight_failed}"
+  fi
+
+  TARGET_NAME="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" target_name)" \
+    || fail_run "target_preflight_result_invalid"
+  TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" target_repo)" \
+    || fail_run "target_preflight_result_invalid"
+  TARGET_BASE_BRANCH="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" base_branch)" \
+    || fail_run "target_preflight_result_invalid"
+  TARGET_BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" base_sha)" \
+    || fail_run "target_preflight_result_invalid"
+  TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" remote_url)" \
+    || fail_run "target_preflight_result_invalid"
+  BASE_SHA="$TARGET_BASE_SHA"
+  WORKTREE_REPO="$TARGET_REPO"
+else
+  BASE_SHA="$(git rev-parse HEAD)"
+fi
+
 {
   echo "RUN_ID=$RUN_ID"
   echo "AGENT_NAME=$AGENT_NAME"
+  echo "RUN_MODE=$RUN_MODE"
   echo "BASE_SHA=$BASE_SHA"
   echo "TASK_FILE=$TASK_FILE"
   echo "AGENT_ADAPTER=$AGENT_ADAPTER"
+  if [[ "$RUN_MODE" == "target" ]]; then
+    echo "TARGET_NAME=$TARGET_NAME"
+    echo "TARGET_REPO=$TARGET_REPO"
+    echo "TARGET_BASE_BRANCH=$TARGET_BASE_BRANCH"
+    echo "TARGET_REMOTE_URL=$TARGET_REMOTE_URL"
+  fi
 } >> "$RUN_DIR/stdout.log"
 
 [[ -x "$AGENT_ADAPTER" ]] || fail_run "agent_adapter_not_found"
 
-git worktree add --detach "$AGENT_WT" "$BASE_SHA" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
+git -C "$WORKTREE_REPO" worktree add --detach "$AGENT_WT" "$BASE_SHA" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || fail_run "agent_worktree_create_failed"
 
 ADAPTER_START_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
   || fail_run "adapter_start_head_lookup_failed"
 
-BRANCHES_BEFORE="$(git for-each-ref --format="%(refname)" refs/heads)" \
+BRANCHES_BEFORE="$(git -C "$WORKTREE_REPO" for-each-ref --format="%(refname)" refs/heads)" \
   || fail_run "adapter_branch_snapshot_failed"
 
-TARGET_STATUS_BEFORE="$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+TARGET_STATUS_BEFORE="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
   || fail_run "target_repo_status_snapshot_failed"
 
 ADAPTER_EXIT=0
 PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || ADAPTER_EXIT=$?
 
-TARGET_STATUS_AFTER="$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+TARGET_STATUS_AFTER="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
   || fail_run "target_repo_status_snapshot_failed"
 
 if [[ "$TARGET_STATUS_BEFORE" != "$TARGET_STATUS_AFTER" ]]; then
@@ -137,7 +195,7 @@ if git -C "$AGENT_WT" symbolic-ref -q HEAD >/dev/null 2>&1; then
   fail_run "adapter_left_detached_head"
 fi
 
-BRANCHES_AFTER="$(git for-each-ref --format="%(refname)" refs/heads)" \
+BRANCHES_AFTER="$(git -C "$WORKTREE_REPO" for-each-ref --format="%(refname)" refs/heads)" \
   || fail_run "adapter_branch_snapshot_failed"
 
 if [[ "$BRANCHES_BEFORE" != "$BRANCHES_AFTER" ]]; then

@@ -30,7 +30,19 @@ RUN_RECORD_REASON="$(
 
 RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
+RUN_MODE="$(python - "$RECORD" <<'PY'
+import json
+import sys
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+print(record.get("run_mode", "forge-local"))
+PY
+)" || die "invalid_run_mode"
 
-git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "base_sha_not_found"
+if [[ "$RUN_MODE" == "target" ]]; then
+  TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_repo)" || die "missing_target_repo"
+  git -C "$TARGET_REPO" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
+else
+  git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "base_sha_not_found"
+fi
 
 echo "VALID_RUN_DIR: $RUN_ID"

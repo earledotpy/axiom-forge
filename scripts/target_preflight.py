@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -153,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="gate.toml")
     parser.add_argument("--forge-root", default=None)
+    parser.add_argument("--json-output", default=None)
     args = parser.parse_args(argv)
 
     config_path = Path(args.config).resolve()
@@ -169,6 +171,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Target: {result['target_name']}")
     print(f"Repo: {result['target_repo']}")
     print(f"Base: {result['base_branch']} {result['base_sha']}")
+    if args.json_output:
+        Path(args.json_output).write_text(
+            json.dumps(result, indent=2) + "\n",
+            encoding="utf-8",
+        )
     return 0
 
 

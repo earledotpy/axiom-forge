@@ -40,12 +40,23 @@ def build_record(
     cli_command="",
     cli_path="",
     cli_version="",
+    run_mode="forge-local",
+    target_repo=".",
+    target_name="",
+    target_base_branch="",
+    target_base_sha="",
+    target_remote_url="",
 ):
     return {
         "schema_version": STRICT_SCHEMA_VERSION,
         "run_id": run_id,
         "agent": agent,
-        "target_repo": ".",
+        "run_mode": run_mode,
+        "target_repo": target_repo,
+        "target_name": clean(target_name),
+        "target_base_branch": clean(target_base_branch),
+        "target_base_sha": clean(target_base_sha),
+        "target_remote_url": clean(target_remote_url),
         "base_sha": base_sha,
         "task_file": clean(task_file),
         "patch_file": clean(patch_file),
@@ -91,6 +102,17 @@ def validate_completed_record(record, *, run_dir_name=None, patch_sha256_actual=
         raise RunRecordError("run_id_directory_mismatch")
 
     base_sha = _required_non_empty_string(record, "base_sha", "missing_base_sha")
+    run_mode = record.get("run_mode", "forge-local")
+    if run_mode not in ("forge-local", "target"):
+        raise RunRecordError("invalid_run_mode")
+    if run_mode == "target":
+        _required_non_empty_string(record, "target_name", "missing_target_name")
+        _required_non_empty_string(record, "target_repo", "missing_target_repo")
+        _required_non_empty_string(record, "target_base_branch", "missing_target_base_branch")
+        target_base_sha = _required_non_empty_string(record, "target_base_sha", "missing_target_base_sha")
+        _required_non_empty_string(record, "target_remote_url", "missing_target_remote_url")
+        if target_base_sha != base_sha:
+            raise RunRecordError("target_base_sha_mismatch")
     run_status = _required_non_empty_string(record, "run_status", "missing_run_status")
     if run_status != COMPLETED:
         raise RunRecordError("run_not_completed")
@@ -116,6 +138,12 @@ def _add_record_args(parser):
     parser.add_argument("--cli-command", default="")
     parser.add_argument("--cli-path", default="")
     parser.add_argument("--cli-version", default="")
+    parser.add_argument("--run-mode", default="forge-local")
+    parser.add_argument("--target-repo", default=".")
+    parser.add_argument("--target-name", default="")
+    parser.add_argument("--target-base-branch", default="")
+    parser.add_argument("--target-base-sha", default="")
+    parser.add_argument("--target-remote-url", default="")
 
 
 def main():
@@ -146,6 +174,12 @@ def main():
             cli_command=args.cli_command,
             cli_path=args.cli_path,
             cli_version=args.cli_version,
+            run_mode=args.run_mode,
+            target_repo=args.target_repo,
+            target_name=args.target_name,
+            target_base_branch=args.target_base_branch,
+            target_base_sha=args.target_base_sha,
+            target_remote_url=args.target_remote_url,
         )
         return 0
 

@@ -8,6 +8,8 @@ PASS_COUNT=0
 FAIL_COUNT=0
 PARENT_SENTINEL="$ROOT/.axiom-parent-dirty-test"
 OUTSIDE_WORKTREE_SENTINEL="$ROOT/tmp/.axiom-outside-worktree-test"
+GATE_BACKUP="$(mktemp)"
+cp gate.toml "$GATE_BACKUP"
 
 pass() {
   echo "PASS: $1"
@@ -28,7 +30,14 @@ cleanup_outside_worktree_sentinel() {
   rmdir "$ROOT/tmp" 2>/dev/null || true
 }
 
-trap 'cleanup_parent_sentinel; cleanup_outside_worktree_sentinel' EXIT
+restore_gate_config() {
+  if [[ -f "$GATE_BACKUP" ]]; then
+    cp "$GATE_BACKUP" gate.toml
+    rm -f "$GATE_BACKUP"
+  fi
+}
+
+trap 'cleanup_parent_sentinel; cleanup_outside_worktree_sentinel; restore_gate_config' EXIT
 
 latest_numeric_run() {
   find runs -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' | sort | tail -n 1
@@ -106,6 +115,40 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+make_target_repo() {
+  local repo="$1"
+  local remote="${2:-https://example.test/target.git}"
+
+  git init -q -b main "$repo"
+  git -C "$repo" config user.email "test@example.invalid"
+  git -C "$repo" config user.name "Axiom Test"
+  git -C "$repo" remote add origin "$remote"
+  mkdir -p "$repo/app"
+  printf 'def answer():\n    return "before"\n' > "$repo/app/target.py"
+  git -C "$repo" add app/target.py
+  git -C "$repo" commit -q -m "initial target"
+}
+
+write_target_gate_config() {
+  local repo="$1"
+  local remote="${2:-https://example.test/target.git}"
+
+  if command -v cygpath >/dev/null 2>&1; then
+    repo="$(cygpath -m "$repo")"
+  fi
+
+  cat > gate.toml <<TOML
+[target.primary]
+name = "test-target"
+repo_path = "$repo"
+expected_base_branch = "main"
+expected_remote_url = "$remote"
+
+[target.primary.verify]
+command = ["python", "-m", "unittest", "discover"]
+timeout_seconds = 120
+TOML
+}
 echo "== Runner Failure Cases =="
 
 expect_runner_fail \
@@ -207,6 +250,7 @@ expect_runner_pass \
   bash scripts/run_agent_task.sh manual-simulated-agent tasks/change-answer.task.md
 
 RUN_ID="$(cat /tmp/axiom-runner-last-good-run)"
+GOOD_RUN_ID="$RUN_ID"
 
 if python - "runs/$RUN_ID/record.json" <<'PY'
 import json
@@ -225,6 +269,52 @@ else
   cat "runs/$RUN_ID/record.json" >&2
 fi
 
+
+TARGET_TMP="$(mktemp -d)"
+TARGET_REPO="$TARGET_TMP/target"
+make_target_repo "$TARGET_REPO"
+TARGET_BASE_SHA="$(git -C "$TARGET_REPO" rev-parse HEAD)"
+write_target_gate_config "$TARGET_REPO"
+
+expect_runner_pass \
+  "R8_target_mode_good_adapter_produces_valid_run" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/change-answer.task.md
+
+RUN_ID="$(cat /tmp/axiom-runner-last-good-run)"
+
+if python - "runs/$RUN_ID/record.json" "$TARGET_BASE_SHA" "$TARGET_REPO" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["run_mode"] == "target"
+assert record["target_name"] == "test-target"
+assert Path(record["target_repo"]).resolve() == Path(sys.argv[3]).resolve()
+assert record["target_base_branch"] == "main"
+assert record["target_base_sha"] == sys.argv[2]
+assert record["base_sha"] == sys.argv[2]
+PY
+then
+  pass "R8a_target_mode_records_target_identity"
+else
+  fail "R8a_target_mode_records_target_identity"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
+
+if [[ -s "runs/$RUN_ID/patch.diff" ]] \
+  && [[ ! -e "$TARGET_REPO/runs/$RUN_ID" ]] \
+  && [[ -z "$(git -C "$TARGET_REPO" status --porcelain)" ]]; then
+  pass "R8b_target_mode_keeps_evidence_in_forge_and_target_clean"
+else
+  fail "R8b_target_mode_evidence_or_target_cleanliness"
+  git -C "$TARGET_REPO" status --short >&2 || true
+  find "$TARGET_REPO" -maxdepth 2 -type d -name runs -print >&2 || true
+fi
+
+rm -rf "$TARGET_TMP"
+restore_gate_config
+RUN_ID="$GOOD_RUN_ID"
 if bash scripts/verify_patch.sh "runs/$RUN_ID" >/tmp/axiom-runner-verify.out 2>/tmp/axiom-runner-verify.err; then
   pass "R7_good_run_verifies"
 else

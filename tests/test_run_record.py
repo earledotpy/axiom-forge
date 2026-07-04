@@ -98,5 +98,39 @@ class RunRecordTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "run_not_completed")
 
 
+    def test_target_mode_validation_requires_target_identity_fields(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(caught.exception.reason, "missing_target_name")
+
+    def test_target_mode_validation_accepts_target_identity_fields(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_name": "axiom",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+        }
+
+        validated = run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(validated["base_sha"], "abc123")
+
 if __name__ == "__main__":
     unittest.main()
