@@ -35,6 +35,10 @@ echo "== Target Verification Matrix =="
 bash tests/target_verify/run_all.sh
 
 echo
+echo "== Target Operator Loop Matrix =="
+bash tests/target_operator_loop/run_all.sh
+
+echo
 echo "== Compatibility Matrix =="
 bash tests/compatibility/run_all.sh
 

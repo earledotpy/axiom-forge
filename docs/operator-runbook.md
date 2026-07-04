@@ -91,6 +91,33 @@ RUN_CAPTURED: <run-id>
 RUN_DIR: runs/<run-id>
 ```
 
+## Run A Target-Mode Task
+
+Use target mode when the patch target is the configured external target repository instead of the Forge checkout. In the first milestone there is one primary target repository configured in `gate.toml`; arbitrary multi-target routing is intentionally out of scope.
+
+Run the standalone target preflight first:
+
+```bash
+python scripts/target_preflight.py --config gate.toml --forge-root .
+```
+
+Required success:
+
+```text
+TARGET_PREFLIGHT: PASS
+```
+
+The target preflight validates the configured path, Git root, `origin` URL, current base branch, clean working tree, base SHA, and target-owned verification command. It is separate from `scripts/forge_check.sh` at first so Forge's full health proof does not depend on the current state of the real external target repository.
+
+Run the adapter with the explicit target flag:
+
+```bash
+bash scripts/run_agent_task.sh --target <agent-name> <task-file>
+RUN_ID="<run-id>"
+```
+
+In target mode, task files and captured run evidence remain Forge-owned under `runs/<run-id>/`. The external target repository is used to create the disposable agent worktree and later receives the promoted `gate/<run-id>` branch during target promotion.
+
 Set the run id:
 
 ```bash
@@ -128,6 +155,20 @@ failure_reason is null
 
 Important: `run_status: COMPLETED` means the adapter produced a captured run. It does not mean the patch is safe to promote.
 
+For a target-mode run, also check:
+
+```text
+run_mode is target
+target_name is the configured primary target repository
+target_repo points to the external target repository
+target_base_branch is the expected target base branch
+target_base_sha matches the recorded base_sha
+target_remote_url is the expected origin URL
+target-preflight.json exists under runs/<run-id>/
+```
+
+Review remains operator-driven for the first milestone. There is no formal review-record artifact yet; inspect `record.json`, `patch.diff`, `verify.json`, and the relevant target repository diff before promotion.
+
 ## Verify A Patch
 
 ```bash
@@ -142,6 +183,14 @@ VERIFY_PATCH: PASS <run-id>
 ```
 
 If this fails, do not promote. Treat the run as evidence.
+
+Target-mode verification requires the explicit target flag:
+
+```bash
+bash scripts/verify_patch.sh --target "runs/$RUN_ID"
+```
+
+This performs target-owned verification from the external target repository's recorded base and writes `runs/<run-id>/verify.json` in Forge-owned evidence.
 
 Common verification failures:
 
@@ -250,6 +299,14 @@ COMMIT: <promotion-commit>
 
 Promotion must create a gate branch, not modify `main`.
 
+For target promotion, use the explicit target flag:
+
+```bash
+printf "%s\n" "$RUN_ID" | bash scripts/promote.sh --target "runs/$RUN_ID"
+```
+
+Target promotion creates `gate/<run-id>` in the external target repository, not in the Forge repository. `promotion.json` remains Forge-owned under `runs/<run-id>/`.
+
 ## Inspect A Promotion
 
 ```bash
@@ -267,6 +324,24 @@ status is PROMOTED
 promotion_commit is present
 main remains clean
 diff scope matches the task
+```
+
+For target promotion, inspect the branch in the external target repository:
+
+```bash
+git -C <target-repo> diff <target-base-branch>.."gate/$RUN_ID"
+cat "runs/$RUN_ID/promotion.json"
+git -C <target-repo> branch --show-current
+git -C <target-repo> status --short
+```
+
+Check:
+
+```text
+gate/<run-id> exists in the external target repository
+the target base branch remains unchanged
+promotion.json records target_name, target_repo, target_base_branch, and promotion_commit
+Forge remains on main unless you intentionally switched it
 ```
 
 If Git switches you away from `main`, return:
