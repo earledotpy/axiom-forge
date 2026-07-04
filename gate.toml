@@ -9,6 +9,16 @@ required_checks = ["unit"]
 [checks.unit]
 command = ["python", "-m", "unittest", "discover", "-s", "tests"]
 
+[target.primary]
+name = "axiom"
+repo_path = "C:/axiom"
+expected_base_branch = "master"
+expected_remote_url = "https://github.com/earledotpy/axiom.git"
+
+[target.primary.verify]
+command = ["python", "-m", "pytest"]
+timeout_seconds = 300
+
 [promotion]
 branch_prefix = "gate/"
 patch_file = "patch.diff"
