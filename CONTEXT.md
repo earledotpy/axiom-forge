@@ -24,6 +24,30 @@ _Avoid_: log, qualification report, promotion record
 A captured run's patch that passes run-directory validation and patch verification from its recorded base in a fresh detached worktree. Verification does not approve or promote the patch.
 _Avoid_: approved patch, promoted patch
 
+**External target repository**:
+A repository outside the Axiom Forge checkout that Axiom Forge is asked to modify through captured runs, verified patches, and explicit promotion.
+_Avoid_: embedded Forge repo, managed subproject
+
+**Primary target repository**:
+The single external target repository selected for Axiom Forge's first real integration milestone.
+_Avoid_: arbitrary target repo, multi-repo target set
+
+**Target repository configuration**:
+Forge-owned configuration that identifies the primary target repository and its expected base branch for target-repo runs.
+_Avoid_: repeated target path argument, implicit working directory target
+
+**Forge-owned evidence**:
+Captured run, verification, and promotion records stored by Axiom Forge for an external target repository run rather than committed into the target repository source tree.
+_Avoid_: target-owned run evidence, application source evidence files
+
+**Target promotion**:
+Promotion of a verified patch onto a gate branch in the external target repository while Axiom Forge retains the promotion evidence.
+_Avoid_: Forge-repo promotion, direct main update
+
+**Target-owned verification**:
+The external target repository's configured checks run by Axiom Forge in a disposable verifier worktree to verify a captured patch for that target.
+_Avoid_: Forge health check, adapter qualification acceptance
+
 **Registered adapter**:
 An adapter listed in the Axiom Forge adapter inventory. Registration is distinct from one successful captured run and does not itself imply standard status or trust.
 _Avoid_: approved adapter, trusted agent
