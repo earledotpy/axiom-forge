@@ -74,6 +74,8 @@ python "$SCRIPT_DIR/verifier_worktree.py" verify-detached \
   --config "$CONFIG" \
   --verify-mode "$VERIFY_MODE" \
   --scope-file "$TARGET_SCOPE_PATH" \
+  --record "$RECORD" \
+  --forge-root "$ROOT" \
   --out "$OUT"
 VERIFY_STATUS=$?
 set -e

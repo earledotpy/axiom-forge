@@ -385,6 +385,7 @@ assert record["run_mode"] == "target"
 assert record["target_name"] == "test-target"
 assert Path(record["target_repo"]).resolve() == Path(sys.argv[3]).resolve()
 assert record["delegation_artifact_revision"] == sys.argv[4]
+assert record["delegation_task_file"] == "tasks/change-answer.task.md"
 assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == sys.argv[2]
 assert record["base_sha"] == sys.argv[2]

@@ -160,6 +160,7 @@ assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == base_sha
 assert record["base_sha"] == base_sha
 assert record["delegation_artifact_revision"] == sys.argv[4]
+assert record["delegation_task_file"] == "tasks/change-answer.task.md"
 assert record["target_scope_file"] == "allowed-paths.txt"
 assert record["target_scope_sha256"]
 PY
@@ -197,6 +198,7 @@ scope_lines = [
 verify = json.load(open(sys.argv[2], encoding="utf-8"))
 assert scope_lines == ["app/target.py"]
 assert verify["status"] == "PASS"
+assert verify["acceptance"]["path"] == "tasks/change-answer.accept.sh"
 PY
   then
     pass "L7_valid_scoped_target_run_remains_promotion_eligible"

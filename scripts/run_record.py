@@ -50,6 +50,7 @@ def build_record(
     target_scope_file="",
     target_scope_sha256="",
     delegation_artifact_revision="",
+    delegation_task_file="",
 ):
     return {
         "schema_version": STRICT_SCHEMA_VERSION,
@@ -64,6 +65,7 @@ def build_record(
         "target_scope_file": clean(target_scope_file),
         "target_scope_sha256": clean(target_scope_sha256),
         "delegation_artifact_revision": clean(delegation_artifact_revision),
+        "delegation_task_file": clean(delegation_task_file),
         "base_sha": base_sha,
         "task_file": clean(task_file),
         "patch_file": clean(patch_file),
@@ -157,6 +159,11 @@ def validate_completed_record(
             "missing_delegation_artifact_revision",
             "malformed_delegation_artifact_revision",
         )
+        _required_non_empty_string(
+            record,
+            "delegation_task_file",
+            "missing_delegation_task_file",
+        )
 
     patch_sha256_expected = record.get("patch_sha256")
     if patch_sha256_expected not in (None, "") and patch_sha256_actual is not None:
@@ -188,6 +195,7 @@ def _add_record_args(parser):
     parser.add_argument("--target-scope-file", default="")
     parser.add_argument("--target-scope-sha256", default="")
     parser.add_argument("--delegation-artifact-revision", default="")
+    parser.add_argument("--delegation-task-file", default="")
 
 
 def main():
@@ -228,6 +236,7 @@ def main():
             target_scope_file=args.target_scope_file,
             target_scope_sha256=args.target_scope_sha256,
             delegation_artifact_revision=args.delegation_artifact_revision,
+            delegation_task_file=args.delegation_task_file,
         )
         return 0
 

@@ -56,6 +56,7 @@ TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
 TARGET_SCOPE_FILE=""
 TARGET_SCOPE_SHA256=""
 DELEGATION_ARTIFACT_REVISION=""
+DELEGATION_TASK_FILE=""
 FORGE_HEAD_BEFORE=""
 FORGE_BRANCHES_BEFORE=""
 FORGE_STATUS_BEFORE=""
@@ -90,6 +91,7 @@ write_record() {
     --target-scope-file "$TARGET_SCOPE_FILE" \
     --target-scope-sha256 "$TARGET_SCOPE_SHA256" \
     --delegation-artifact-revision "$DELEGATION_ARTIFACT_REVISION" \
+    --delegation-task-file "$DELEGATION_TASK_FILE" \
     --failure-reason "$reason"
 }
 
@@ -98,6 +100,27 @@ target_scope_sidecar_path() {
   local task_file="$1"
   [[ "$task_file" == *.task.md ]] || return 1
   printf '%s.allowed-paths.txt\n' "${task_file%.task.md}"
+}
+
+target_acceptance_check_path() {
+  local task_file="$1"
+  [[ "$task_file" == tasks/*.task.md ]] || return 1
+  printf '%s.accept.sh\n' "${task_file%.task.md}"
+}
+
+validate_target_acceptance_check() {
+  local acceptance_file="$1"
+  local content=""
+
+  if grep -Fxq "$acceptance_file" "$RUN_DIR/allowed-paths.txt"; then
+    fail_run "target_acceptance_check_in_scope"
+  fi
+
+  if ! content="$(git -C "$ROOT" show "$DELEGATION_ARTIFACT_REVISION:$acceptance_file" 2>/dev/null)"; then
+    fail_run "missing_target_acceptance_check"
+  fi
+
+  [[ -n "${content//[[:space:]]/}" ]] || fail_run "invalid_target_acceptance_check"
 }
 
 validate_and_copy_target_scope() {
@@ -172,10 +195,14 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
 
   DELEGATION_ARTIFACT_REVISION="$(git -C "$ROOT" rev-parse HEAD)" \
     || fail_run "delegation_artifact_revision_unresolved"
+  DELEGATION_TASK_FILE="$TASK_FILE"
 
   TARGET_SCOPE_SOURCE="$(target_scope_sidecar_path "$TASK_FILE")" \
     || fail_run "invalid_target_task_scope"
   validate_and_copy_target_scope "$TARGET_SCOPE_SOURCE"
+  TARGET_ACCEPTANCE_SOURCE="$(target_acceptance_check_path "$TASK_FILE")" \
+    || fail_run "invalid_target_acceptance_check"
+  validate_target_acceptance_check "$TARGET_ACCEPTANCE_SOURCE"
 
   if python "$SCRIPT_DIR/target_preflight.py" \
     --config "$ROOT/gate.toml" \

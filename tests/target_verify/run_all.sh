@@ -53,10 +53,14 @@ from pathlib import Path
 text = Path("app/target.py").read_text(encoding="utf-8")
 raise SystemExit(0 if 'return "after"' in text else 1)
 PY
-  mkdir -p "$repo/docs" "$repo/bin"
+  mkdir -p "$repo/docs" "$repo/bin" "$repo/tasks"
   cat > "$repo/docs/delete.md" <<'DOC'
 remove me
 DOC
+  cat > "$repo/tasks/target-verify-fixture.accept.sh" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
   cat > "$repo/app/old.py" <<'PY'
 def old_name():
     return "old"
@@ -66,7 +70,7 @@ from pathlib import Path
 import sys
 Path(sys.argv[1]).write_bytes(bytes([0, 1, 2, 3, 4]))
 PY
-  git -C "$repo" add app/target.py app/old.py bin/blob.dat check_target.py docs/delete.md
+  git -C "$repo" add app/target.py app/old.py bin/blob.dat check_target.py docs/delete.md tasks/target-verify-fixture.accept.sh
   git -C "$repo" commit -q -m "initial target"
 }
 
@@ -92,6 +96,7 @@ write_target_run() {
   local run_id="$1"
   local repo="$2"
   local target_name="${3:-test-target}"
+  local delegation_task_file="tasks/target-verify-fixture.task.md"
   local base_sha
   local patch_sha
   local scope_sha
@@ -114,13 +119,13 @@ PATCH
   scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
   forge_revision="$(git rev-parse HEAD)"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" "tasks/target-verify-fixture.task.md" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision = sys.argv[1:]
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision, delegation_task_file = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -134,6 +139,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_task_file": delegation_task_file,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -153,6 +159,7 @@ write_target_run_from_clone() {
   local repo="$2"
   local scope_text="$3"
   local mutation="$4"
+  local delegation_task_file="${5:-tasks/target-verify-fixture.task.md}"
   local work="$TMPDIR/$run_id-work"
   local base_sha
   local patch_sha
@@ -186,6 +193,12 @@ import sys
 Path(sys.argv[1]).write_bytes(bytes([0, 1, 2, 3, 255, 254]))
 PY
       ;;
+    modify_acceptance_check)
+      mkdir -p "$work/tasks"
+      printf '#!/usr/bin/env bash
+exit 0
+' > "$work/tasks/target-verify-fixture.accept.sh"
+      ;;
     *)
       echo "unknown mutation: $mutation" >&2
       exit 1
@@ -199,13 +212,13 @@ PY
   scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
   forge_revision="$(git rev-parse HEAD)"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "test-target" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "test-target" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" "$delegation_task_file" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision = sys.argv[1:]
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision, delegation_task_file = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -219,6 +232,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_task_file": delegation_task_file,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -388,6 +402,8 @@ import sys
 result = json.load(open(sys.argv[1], encoding="utf-8"))
 assert result["status"] == "PASS"
 assert result["check"]["command"] == ["python", "check_target.py"]
+assert result["acceptance"]["path"] == "tasks/target-verify-fixture.accept.sh"
+assert result["acceptance"]["returncode"] == 0
 PY
 then
   pass "V3a_target_success_writes_stable_verify_json"
@@ -397,6 +413,57 @@ else
 fi
 
 write_gate_config "$TARGET_REPO" '"python", "-c", "raise SystemExit(0)"'
+write_target_run "target-acceptance-missing" "$TARGET_REPO"
+python - "runs/target-acceptance-missing/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record["delegation_task_file"] = "tasks/missing-scope-fixture.task.md"
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V3b_missing_target_acceptance_check_fails_closed" \
+  "missing_target_acceptance_check" \
+  bash scripts/verify_patch.sh --target runs/target-acceptance-missing
+
+write_target_run "target-acceptance-invalid" "$TARGET_REPO"
+python - "runs/target-acceptance-invalid/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record["delegation_task_file"] = "tasks/empty-acceptance-fixture.task.md"
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V3c_invalid_target_acceptance_check_fails_closed" \
+  "invalid_target_acceptance_check" \
+  bash scripts/verify_patch.sh --target runs/target-acceptance-invalid
+
+write_target_run "target-acceptance-failing" "$TARGET_REPO"
+python - "runs/target-acceptance-failing/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record["delegation_task_file"] = "tasks/change-answer.task.md"
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V3d_failing_target_acceptance_check_fails_closed" \
+  "target_acceptance_failed" \
+  bash scripts/verify_patch.sh --target runs/target-acceptance-failing
+
+write_target_run_from_clone "target-acceptance-modified-check" "$TARGET_REPO" "tasks/target-verify-fixture.accept.sh" "modify_acceptance_check"
+expect_fail_reason \
+  "V3e_acceptance_check_cannot_be_inside_adapter_scope" \
+  "target_acceptance_check_in_scope" \
+  bash scripts/verify_patch.sh --target runs/target-acceptance-modified-check
+
 write_target_run_from_clone "target-scope-in-scope" "$TARGET_REPO" "app/target.py" "modify_target"
 expect_pass \
   "V3b_target_scope_allows_listed_modified_path" \
@@ -408,7 +475,7 @@ expect_fail_reason \
   "patch_outside_target_task_scope" \
   bash scripts/verify_patch.sh --target runs/target-scope-out-of-scope
 
-write_target_run_from_clone "target-scope-rename-allowed" "$TARGET_REPO" $'app/old.py\napp/new.py' "rename_old"
+write_target_run_from_clone "target-scope-rename-allowed" "$TARGET_REPO" $'app/old.py\napp/new.py' "rename_old" "tasks/scope-only-fixture.task.md"
 expect_pass \
   "V3d_target_scope_allows_rename_when_old_and_new_listed" \
   bash scripts/verify_patch.sh --target runs/target-scope-rename-allowed
@@ -419,12 +486,12 @@ expect_fail_reason \
   "patch_outside_target_task_scope" \
   bash scripts/verify_patch.sh --target runs/target-scope-rename-rejected
 
-write_target_run_from_clone "target-scope-delete-allowed" "$TARGET_REPO" "docs/delete.md" "delete_doc"
+write_target_run_from_clone "target-scope-delete-allowed" "$TARGET_REPO" "docs/delete.md" "delete_doc" "tasks/scope-only-fixture.task.md"
 expect_pass \
   "V3f_target_scope_allows_listed_delete" \
   bash scripts/verify_patch.sh --target runs/target-scope-delete-allowed
 
-write_target_run_from_clone "target-scope-binary-allowed" "$TARGET_REPO" "bin/blob.dat" "modify_binary"
+write_target_run_from_clone "target-scope-binary-allowed" "$TARGET_REPO" "bin/blob.dat" "modify_binary" "tasks/scope-only-fixture.task.md"
 expect_pass \
   "V3g_target_scope_allows_listed_binary_change" \
   bash scripts/verify_patch.sh --target runs/target-scope-binary-allowed

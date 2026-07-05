@@ -184,6 +184,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_task_file": "tasks/target-verify-fixture.task.md",
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",

@@ -175,6 +175,9 @@ if [[ "$POST_VERIFY_MODE" == "target" ]]; then
     --config "$CONFIG" \
     --worktree "$GATE_WT" \
     --out "$RUN_DIR/post_verify.json" \
+    --record "$RECORD" \
+    --forge-root "$ROOT" \
+    --scope-file "$RUN_DIR/allowed-paths.txt" \
     || fail_closed "post_promotion_verification_failed"
 else
   python "$SCRIPT_DIR/verifier_worktree.py" verify-target \

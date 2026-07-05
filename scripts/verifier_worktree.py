@@ -123,7 +123,7 @@ def verify_target(script_dir, config, worktree, out):
         raise VerifierError(VERIFICATION_FAILED)
 
 
-def verify_target_mode(script_dir, config, worktree, out):
+def verify_target_mode(script_dir, config, worktree, out, record, forge_root, scope_file):
     completed = run_command(
         [
             sys.executable,
@@ -135,6 +135,12 @@ def verify_target_mode(script_dir, config, worktree, out):
             str(worktree),
             "--out",
             str(out),
+            "--record",
+            str(record),
+            "--forge-root",
+            str(forge_root),
+            "--scope-file",
+            str(scope_file),
         ]
     )
     if completed.returncode != 0:
@@ -150,6 +156,8 @@ def verify_detached(
     out,
     verify_mode="forge-local",
     scope_file=None,
+    record=None,
+    forge_root=None,
 ):
     worktree = None
     try:
@@ -157,7 +165,7 @@ def verify_detached(
         apply_patch(worktree, patch)
         if verify_mode == "target":
             enforce_target_task_scope(worktree, scope_file)
-            verify_target_mode(script_dir, config, worktree, out)
+            verify_target_mode(script_dir, config, worktree, out, record, forge_root, scope_file)
         else:
             verify_target(script_dir, config, worktree, out)
     finally:
@@ -178,6 +186,8 @@ def main(argv=None):
     verify_parser.add_argument("--out", required=True)
     verify_parser.add_argument("--verify-mode", choices=("forge-local", "target"), default="forge-local")
     verify_parser.add_argument("--scope-file", default=None)
+    verify_parser.add_argument("--record", default=None)
+    verify_parser.add_argument("--forge-root", default=None)
 
     create_parser = subparsers.add_parser("create-detached")
     create_parser.add_argument("--repo-root", required=True)
@@ -206,6 +216,8 @@ def main(argv=None):
                 Path(args.out),
                 args.verify_mode,
                 args.scope_file,
+                args.record,
+                args.forge_root,
             )
         elif args.command == "create-detached":
             worktree = create_detached_worktree(Path(args.repo_root), args.base_sha)
