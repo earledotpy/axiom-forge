@@ -59,8 +59,8 @@ expected_base_branch = "master"
 expected_remote_url = "https://github.com/earledotpy/axiom.git"
 
 [target.primary.verify]
-command = ["python", "-m", "pytest"]
-timeout_seconds = 900
+command = ["python", "-m", "pytest", "tests/test_bootstrap_validation.py", "tests/test_verify_foundation.py"]
+timeout_seconds = 300
 ```
 
 The target preflight is local and fail-closed. It validates the configured path, Git root, `origin` URL, current branch, clean working tree, base SHA, and target verification command:
