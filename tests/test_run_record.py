@@ -98,6 +98,28 @@ class RunRecordTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "run_not_completed")
 
 
+    def test_failed_target_record_can_omit_unproven_target_identity(self):
+        record = run_record.build_record(
+            run_id="target-fail",
+            agent="agent",
+            base_sha="",
+            status="FAILED",
+            run_mode="target",
+            target_repo="",
+            failure_reason="target_remote_mismatch",
+        )
+
+        self.assertEqual(record["run_mode"], "target")
+        self.assertEqual(record["base_sha"], "")
+        self.assertIsNone(record["target_repo"])
+        self.assertIsNone(record["target_name"])
+        self.assertEqual(record["failure_reason"], "target_remote_mismatch")
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="target-fail")
+
+        self.assertEqual(caught.exception.reason, "run_not_completed")
+
     def test_target_mode_validation_requires_target_identity_fields(self):
         record = {
             "run_id": "target-run",

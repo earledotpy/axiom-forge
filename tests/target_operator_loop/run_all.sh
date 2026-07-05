@@ -20,7 +20,12 @@ fail() {
   FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
+hide_gate_config_change() {
+  git update-index --skip-worktree gate.toml
+}
+
 cleanup() {
+  git update-index --no-skip-worktree gate.toml >/dev/null 2>&1 || true
   cp "$GATE_BACKUP" gate.toml
   rm -f "$GATE_BACKUP"
   rm -rf "$TMPDIR"
@@ -108,6 +113,7 @@ fi
 TARGET_REPO="$TMPDIR/target"
 make_target_repo "$TARGET_REPO"
 write_target_gate_config "$TARGET_REPO"
+hide_gate_config_change
 TARGET_MAIN_BEFORE="$(git -C "$TARGET_REPO" rev-parse main)"
 
 expect_pass \

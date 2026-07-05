@@ -52,7 +52,7 @@ def build_record(
         "run_id": run_id,
         "agent": agent,
         "run_mode": run_mode,
-        "target_repo": target_repo,
+        "target_repo": clean(target_repo),
         "target_name": clean(target_name),
         "target_base_branch": clean(target_base_branch),
         "target_base_sha": clean(target_base_sha),
@@ -101,6 +101,10 @@ def validate_completed_record(record, *, run_dir_name=None, patch_sha256_actual=
     if run_dir_name is not None and run_id != run_dir_name:
         raise RunRecordError("run_id_directory_mismatch")
 
+    run_status = _required_non_empty_string(record, "run_status", "missing_run_status")
+    if run_status != COMPLETED:
+        raise RunRecordError("run_not_completed")
+
     base_sha = _required_non_empty_string(record, "base_sha", "missing_base_sha")
     run_mode = record.get("run_mode", "forge-local")
     if run_mode not in ("forge-local", "target"):
@@ -113,9 +117,6 @@ def validate_completed_record(record, *, run_dir_name=None, patch_sha256_actual=
         _required_non_empty_string(record, "target_remote_url", "missing_target_remote_url")
         if target_base_sha != base_sha:
             raise RunRecordError("target_base_sha_mismatch")
-    run_status = _required_non_empty_string(record, "run_status", "missing_run_status")
-    if run_status != COMPLETED:
-        raise RunRecordError("run_not_completed")
 
     patch_sha256_expected = record.get("patch_sha256")
     if patch_sha256_expected not in (None, "") and patch_sha256_actual is not None:

@@ -53,6 +53,9 @@ TARGET_BASE_SHA=""
 TARGET_REMOTE_URL=""
 TARGET_PREFLIGHT_JSON="$RUN_DIR/target-preflight.json"
 TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
+FORGE_HEAD_BEFORE=""
+FORGE_BRANCHES_BEFORE=""
+FORGE_STATUS_BEFORE=""
 
 mkdir -p "$RUN_DIR"
 cp "$TASK_FILE" "$RUN_DIR/task.md"
@@ -110,6 +113,11 @@ fail_run() {
 
 if [[ "$TARGET_MODE" -eq 1 ]]; then
   RUN_MODE="target"
+  TARGET_REPO=""
+  if [[ -n "$(git status --porcelain)" ]]; then
+    fail_run "forge_repo_dirty"
+  fi
+
   if python "$SCRIPT_DIR/target_preflight.py" \
     --config "$ROOT/gate.toml" \
     --forge-root "$ROOT" \
@@ -136,6 +144,15 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
   WORKTREE_REPO="$TARGET_REPO"
 else
   BASE_SHA="$(git rev-parse HEAD)"
+fi
+
+if [[ "$RUN_MODE" == "target" ]]; then
+  FORGE_HEAD_BEFORE="$(git -C "$ROOT" rev-parse HEAD)" \
+    || fail_run "forge_head_snapshot_failed"
+  FORGE_BRANCHES_BEFORE="$(git -C "$ROOT" for-each-ref --format="%(refname)" refs/heads)" \
+    || fail_run "forge_branch_snapshot_failed"
+  FORGE_STATUS_BEFORE="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+    || fail_run "forge_status_snapshot_failed"
 fi
 
 {
@@ -175,7 +192,20 @@ TARGET_STATUS_AFTER="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked
   || fail_run "target_repo_status_snapshot_failed"
 
 if [[ "$TARGET_STATUS_BEFORE" != "$TARGET_STATUS_AFTER" ]]; then
-  fail_run "adapter_modified_outside_worktree"
+  if [[ "$RUN_MODE" == "target" ]]; then
+    fail_run "adapter_modified_target_repo"
+  else
+    fail_run "adapter_modified_outside_worktree"
+  fi
+fi
+
+if [[ "$RUN_MODE" == "target" ]]; then
+  FORGE_STATUS_AFTER="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+    || fail_run "forge_status_snapshot_failed"
+
+  if [[ "$FORGE_STATUS_BEFORE" != "$FORGE_STATUS_AFTER" ]]; then
+    fail_run "adapter_modified_forge_checkout"
+  fi
 fi
 
 read_cli_provenance || fail_run "cli_provenance_invalid"
@@ -200,6 +230,21 @@ BRANCHES_AFTER="$(git -C "$WORKTREE_REPO" for-each-ref --format="%(refname)" ref
 
 if [[ "$BRANCHES_BEFORE" != "$BRANCHES_AFTER" ]]; then
   fail_run "adapter_created_or_deleted_branch"
+fi
+
+if [[ "$RUN_MODE" == "target" ]]; then
+  FORGE_HEAD_AFTER="$(git -C "$ROOT" rev-parse HEAD)" \
+    || fail_run "forge_head_snapshot_failed"
+  FORGE_BRANCHES_AFTER="$(git -C "$ROOT" for-each-ref --format="%(refname)" refs/heads)" \
+    || fail_run "forge_branch_snapshot_failed"
+
+  if [[ "$FORGE_HEAD_BEFORE" != "$FORGE_HEAD_AFTER" ]]; then
+    fail_run "adapter_changed_forge_head"
+  fi
+
+  if [[ "$FORGE_BRANCHES_BEFORE" != "$FORGE_BRANCHES_AFTER" ]]; then
+    fail_run "adapter_changed_forge_branches"
+  fi
 fi
 
 git -C "$AGENT_WT" diff --binary > "$RUN_DIR/patch.diff" \

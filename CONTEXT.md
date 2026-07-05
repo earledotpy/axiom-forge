@@ -16,6 +16,10 @@ _Avoid_: qualification run, acceptance test
 The evidence directory produced from one agent invocation, including its run record and patch. A captured run may be verified without being promoted.
 _Avoid_: execution, job
 
+**Target-mode captured run**:
+A captured run produced with explicit target mode, where the patch applies to the configured external target repository while the run evidence remains Forge-owned.
+_Avoid_: target execution, external job
+
 **Captured run record**:
 The structured evidence item inside a captured run that identifies the run, agent, base, task, patch, CLI provenance, and completed or failed status.
 _Avoid_: log, qualification report, promotion record

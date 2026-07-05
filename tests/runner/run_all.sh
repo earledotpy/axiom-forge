@@ -8,6 +8,7 @@ PASS_COUNT=0
 FAIL_COUNT=0
 PARENT_SENTINEL="$ROOT/.axiom-parent-dirty-test"
 OUTSIDE_WORKTREE_SENTINEL="$ROOT/tmp/.axiom-outside-worktree-test"
+FORGE_DIRTY_SENTINEL="$ROOT/.axiom-forge-dirty-test"
 GATE_BACKUP="$(mktemp)"
 cp gate.toml "$GATE_BACKUP"
 
@@ -30,16 +31,26 @@ cleanup_outside_worktree_sentinel() {
   rmdir "$ROOT/tmp" 2>/dev/null || true
 }
 
+cleanup_forge_dirty_sentinel() {
+  rm -f "$FORGE_DIRTY_SENTINEL"
+}
+
+hide_gate_config_change() {
+  git update-index --skip-worktree gate.toml
+}
+
 restore_gate_config() {
+  git update-index --no-skip-worktree gate.toml >/dev/null 2>&1 || true
   if [[ -f "$GATE_BACKUP" ]]; then
     cp "$GATE_BACKUP" gate.toml
     rm -f "$GATE_BACKUP"
   fi
 }
 
-trap 'cleanup_parent_sentinel; cleanup_outside_worktree_sentinel; restore_gate_config' EXIT
+trap 'cleanup_parent_sentinel; cleanup_outside_worktree_sentinel; cleanup_forge_dirty_sentinel; restore_gate_config' EXIT
 
 latest_numeric_run() {
+  [[ -d runs ]] || return 0
   find runs -mindepth 1 -maxdepth 1 -type d -name '20*' -printf '%f\n' | sort | tail -n 1
 }
 
@@ -275,6 +286,73 @@ TARGET_REPO="$TARGET_TMP/target"
 make_target_repo "$TARGET_REPO"
 TARGET_BASE_SHA="$(git -C "$TARGET_REPO" rev-parse HEAD)"
 write_target_gate_config "$TARGET_REPO"
+hide_gate_config_change
+
+: > "$FORGE_DIRTY_SENTINEL"
+expect_runner_fail \
+  "R8c_target_mode_dirty_forge_records_failed_evidence" \
+  "forge_repo_dirty" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/change-answer.task.md
+cleanup_forge_dirty_sentinel
+
+RUN_ID="$(latest_numeric_run)"
+if python - "runs/$RUN_ID/record.json" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["run_mode"] == "target"
+assert record["base_sha"] == ""
+assert record["target_repo"] is None
+assert record["target_name"] is None
+assert record["target_base_sha"] is None
+PY
+then
+  pass "R8d_dirty_forge_record_has_no_unproven_target_identity"
+else
+  fail "R8d_dirty_forge_record_has_no_unproven_target_identity"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
+
+write_target_gate_config "$TARGET_REPO" "https://example.test/wrong.git"
+hide_gate_config_change
+expect_runner_fail \
+  "R8e_target_preflight_failure_records_stable_reason" \
+  "target_remote_mismatch" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/change-answer.task.md
+
+RUN_ID="$(latest_numeric_run)"
+if python - "runs/$RUN_ID/record.json" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["run_mode"] == "target"
+assert record["base_sha"] == ""
+assert record["target_repo"] is None
+assert record["target_name"] is None
+assert record["target_base_sha"] is None
+PY
+then
+  pass "R8f_preflight_failure_record_has_no_unproven_target_identity"
+else
+  fail "R8f_preflight_failure_record_has_no_unproven_target_identity"
+  cat "runs/$RUN_ID/record.json" >&2
+fi
+
+write_target_gate_config "$TARGET_REPO"
+hide_gate_config_change
+expect_runner_fail \
+  "R8g_target_mode_distinguishes_forge_mutation" \
+  "adapter_modified_forge_checkout" \
+  env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh --target bad-parent-dirty-agent tasks/change-answer.task.md
+cleanup_parent_sentinel
+
+expect_runner_fail \
+  "R8h_target_mode_distinguishes_target_mutation" \
+  "adapter_modified_target_repo" \
+  env "AXIOM_TEST_PARENT_ROOT=$TARGET_REPO" bash scripts/run_agent_task.sh --target bad-parent-dirty-agent tasks/change-answer.task.md
+rm -f "$TARGET_REPO/.axiom-parent-dirty-test"
 
 expect_runner_pass \
   "R8_target_mode_good_adapter_produces_valid_run" \
