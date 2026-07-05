@@ -5,11 +5,17 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    from target_task_scope import ChangedPath, TargetTaskScopeError, check_changed_paths_allowed, load_scope_sidecar
+except ModuleNotFoundError:
+    from scripts.target_task_scope import ChangedPath, TargetTaskScopeError, check_changed_paths_allowed, load_scope_sidecar
+
 
 VERIFY_WORKTREE_CREATE_FAILED = 10
 PATCH_CHECK_FAILED = 20
 PATCH_APPLY_FAILED = 21
 VERIFICATION_FAILED = 30
+PATCH_OUTSIDE_TARGET_TASK_SCOPE = 31
 
 
 class VerifierError(Exception):
@@ -63,6 +69,43 @@ def apply_patch(worktree, patch):
         raise VerifierError(PATCH_APPLY_FAILED)
 
 
+def changed_paths_after_apply(worktree):
+    completed = subprocess.run(
+        ["git", "-C", str(worktree), "diff", "--name-status", "-M", "--no-ext-diff"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise VerifierError(VERIFICATION_FAILED)
+
+    changed_paths = []
+    for line in completed.stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split("\t")
+        status = parts[0]
+        if status.startswith("R"):
+            if len(parts) != 3:
+                raise VerifierError(PATCH_OUTSIDE_TARGET_TASK_SCOPE)
+            changed_paths.append(ChangedPath(status, parts[2], old_path=parts[1]))
+        elif len(parts) == 2:
+            changed_paths.append(ChangedPath(status, parts[1]))
+        else:
+            raise VerifierError(PATCH_OUTSIDE_TARGET_TASK_SCOPE)
+    return changed_paths
+
+
+def enforce_target_task_scope(worktree, scope_file):
+    try:
+        allowed_paths = load_scope_sidecar(Path(scope_file))
+        check_changed_paths_allowed(allowed_paths, changed_paths_after_apply(worktree))
+    except TargetTaskScopeError as exc:
+        if exc.reason == "target_scope_changed_path_outside_scope":
+            raise VerifierError(PATCH_OUTSIDE_TARGET_TASK_SCOPE)
+        raise VerifierError(VERIFICATION_FAILED)
+
+
 def verify_target(script_dir, config, worktree, out):
     completed = run_command(
         [
@@ -98,12 +141,22 @@ def verify_target_mode(script_dir, config, worktree, out):
         raise VerifierError(VERIFICATION_FAILED)
 
 
-def verify_detached(repo_root, script_dir, base_sha, patch, config, out, verify_mode="forge-local"):
+def verify_detached(
+    repo_root,
+    script_dir,
+    base_sha,
+    patch,
+    config,
+    out,
+    verify_mode="forge-local",
+    scope_file=None,
+):
     worktree = None
     try:
         worktree = create_detached_worktree(repo_root, base_sha)
         apply_patch(worktree, patch)
         if verify_mode == "target":
+            enforce_target_task_scope(worktree, scope_file)
             verify_target_mode(script_dir, config, worktree, out)
         else:
             verify_target(script_dir, config, worktree, out)
@@ -124,6 +177,7 @@ def main(argv=None):
     verify_parser.add_argument("--config", required=True)
     verify_parser.add_argument("--out", required=True)
     verify_parser.add_argument("--verify-mode", choices=("forge-local", "target"), default="forge-local")
+    verify_parser.add_argument("--scope-file", default=None)
 
     create_parser = subparsers.add_parser("create-detached")
     create_parser.add_argument("--repo-root", required=True)
@@ -151,6 +205,7 @@ def main(argv=None):
                 Path(args.config),
                 Path(args.out),
                 args.verify_mode,
+                args.scope_file,
             )
         elif args.command == "create-detached":
             worktree = create_detached_worktree(Path(args.repo_root), args.base_sha)

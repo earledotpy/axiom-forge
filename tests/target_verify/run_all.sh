@@ -53,7 +53,20 @@ from pathlib import Path
 text = Path("app/target.py").read_text(encoding="utf-8")
 raise SystemExit(0 if 'return "after"' in text else 1)
 PY
-  git -C "$repo" add app/target.py check_target.py
+  mkdir -p "$repo/docs" "$repo/bin"
+  cat > "$repo/docs/delete.md" <<'DOC'
+remove me
+DOC
+  cat > "$repo/app/old.py" <<'PY'
+def old_name():
+    return "old"
+PY
+  python - "$repo/bin/blob.dat" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(bytes([0, 1, 2, 3, 4]))
+PY
+  git -C "$repo" add app/target.py app/old.py bin/blob.dat check_target.py docs/delete.md
   git -C "$repo" commit -q -m "initial target"
 }
 
@@ -100,6 +113,88 @@ PATCH
   scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
 
   python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha = sys.argv[1:]
+record = {
+    "schema_version": 2,
+    "run_id": run_id,
+    "agent": "test-agent",
+    "run_mode": "target",
+    "target_repo": str(Path(repo).resolve()),
+    "target_name": target_name,
+    "target_base_branch": "main",
+    "target_base_sha": base_sha,
+    "target_remote_url": "https://example.test/target.git",
+    "target_scope_file": "allowed-paths.txt",
+    "target_scope_sha256": scope_sha,
+    "base_sha": base_sha,
+    "task_file": "task.md",
+    "patch_file": "patch.diff",
+    "patch_sha256": patch_sha,
+    "cli_command": "test-agent",
+    "cli_path": "/bin/test-agent",
+    "cli_version": "test",
+    "run_status": "COMPLETED",
+    "failure_reason": None,
+    "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+Path(record_path).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+}
+write_target_run_from_clone() {
+  local run_id="$1"
+  local repo="$2"
+  local scope_text="$3"
+  local mutation="$4"
+  local work="$TMPDIR/$run_id-work"
+  local base_sha
+  local patch_sha
+  local scope_sha
+
+  base_sha="$(git -C "$repo" rev-parse HEAD)"
+  git clone -q "$repo" "$work"
+
+  case "$mutation" in
+    modify_target)
+      python - "$work/app/target.py" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text('def answer():\n    return "after"\n', encoding='utf-8')
+PY
+      ;;
+    modify_other)
+      printf 'outside\n' > "$work/docs/delete.md"
+      ;;
+    rename_old)
+      git -C "$work" mv app/old.py app/new.py
+      ;;
+    delete_doc)
+      rm "$work/docs/delete.md"
+      ;;
+    modify_binary)
+      python - "$work/bin/blob.dat" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(bytes([0, 1, 2, 3, 255, 254]))
+PY
+      ;;
+    *)
+      echo "unknown mutation: $mutation" >&2
+      exit 1
+      ;;
+  esac
+
+  mkdir -p "runs/$run_id"
+  git -C "$work" diff --binary -M HEAD > "$(pwd)/runs/$run_id/patch.diff"
+  patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
+  printf '%s\n' "$scope_text" > "runs/$run_id/allowed-paths.txt"
+  scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
+
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "test-target" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
@@ -248,6 +343,39 @@ else
   fail "V3a_target_success_writes_stable_verify_json"
   cat runs/target-verify-success/verify.json >&2
 fi
+
+write_gate_config "$TARGET_REPO" '"python", "-c", "raise SystemExit(0)"'
+write_target_run_from_clone "target-scope-in-scope" "$TARGET_REPO" "app/target.py" "modify_target"
+expect_pass \
+  "V3b_target_scope_allows_listed_modified_path" \
+  bash scripts/verify_patch.sh --target runs/target-scope-in-scope
+
+write_target_run_from_clone "target-scope-out-of-scope" "$TARGET_REPO" "app/target.py" "modify_other"
+expect_fail_reason \
+  "V3c_target_scope_rejects_out_of_scope_path" \
+  "patch_outside_target_task_scope" \
+  bash scripts/verify_patch.sh --target runs/target-scope-out-of-scope
+
+write_target_run_from_clone "target-scope-rename-allowed" "$TARGET_REPO" $'app/old.py\napp/new.py' "rename_old"
+expect_pass \
+  "V3d_target_scope_allows_rename_when_old_and_new_listed" \
+  bash scripts/verify_patch.sh --target runs/target-scope-rename-allowed
+
+write_target_run_from_clone "target-scope-rename-rejected" "$TARGET_REPO" "app/new.py" "rename_old"
+expect_fail_reason \
+  "V3e_target_scope_rejects_rename_missing_old_path" \
+  "patch_outside_target_task_scope" \
+  bash scripts/verify_patch.sh --target runs/target-scope-rename-rejected
+
+write_target_run_from_clone "target-scope-delete-allowed" "$TARGET_REPO" "docs/delete.md" "delete_doc"
+expect_pass \
+  "V3f_target_scope_allows_listed_delete" \
+  bash scripts/verify_patch.sh --target runs/target-scope-delete-allowed
+
+write_target_run_from_clone "target-scope-binary-allowed" "$TARGET_REPO" "bin/blob.dat" "modify_binary"
+expect_pass \
+  "V3g_target_scope_allows_listed_binary_change" \
+  bash scripts/verify_patch.sh --target runs/target-scope-binary-allowed
 
 write_gate_config "$TARGET_REPO" '"python", "-c", "raise SystemExit(7)"'
 write_target_run "target-verify-command-fail" "$TARGET_REPO"

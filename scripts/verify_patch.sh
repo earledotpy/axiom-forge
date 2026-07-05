@@ -27,6 +27,7 @@ CONFIG="$ROOT/gate.toml"
 RECORD="$RUN_DIR/record.json"
 PATCH="$RUN_DIR/patch.diff"
 OUT="$RUN_DIR/verify.json"
+TARGET_SCOPE_PATH=""
 
 RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
 BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
@@ -61,6 +62,7 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
   REPO_ROOT="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
   BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
   VERIFY_MODE="target"
+  TARGET_SCOPE_PATH="$RUN_DIR/allowed-paths.txt"
 fi
 
 set +e
@@ -71,6 +73,7 @@ python "$SCRIPT_DIR/verifier_worktree.py" verify-detached \
   --patch "$ROOT/$PATCH" \
   --config "$CONFIG" \
   --verify-mode "$VERIFY_MODE" \
+  --scope-file "$TARGET_SCOPE_PATH" \
   --out "$OUT"
 VERIFY_STATUS=$?
 set -e
@@ -81,6 +84,7 @@ case "$VERIFY_STATUS" in
   20) die "patch_check_failed" ;;
   21) die "patch_apply_failed" ;;
   30) die "verification_failed" ;;
+  31) die "patch_outside_target_task_scope" ;;
   *) die "verification_failed" ;;
 esac
 
