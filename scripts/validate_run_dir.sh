@@ -39,6 +39,21 @@ PY
 )" || die "invalid_run_mode"
 
 if [[ "$RUN_MODE" == "target" ]]; then
+  TARGET_SCOPE_FILE="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_scope_file)" || die "missing_target_scope_file"
+  [[ "$TARGET_SCOPE_FILE" == "allowed-paths.txt" ]] || die "invalid_target_scope_file"
+  TARGET_SCOPE_PATH="$RUN_DIR/$TARGET_SCOPE_FILE"
+  [[ -s "$TARGET_SCOPE_PATH" ]] || die "missing_or_empty_target_scope_file"
+  TARGET_SCOPE_ACTUAL="$(python "$SCRIPT_DIR/sha256_file.py" "$TARGET_SCOPE_PATH")" \
+    || die "target_scope_sha256_compute_failed"
+
+  RUN_RECORD_REASON="$(
+    python "$SCRIPT_DIR/run_record.py" validate-completed \
+      --record "$RECORD" \
+      --run-dir-name "$RUN_DIR_NAME" \
+      --patch-sha256-actual "$PATCH_ACTUAL" \
+      --target-scope-sha256-actual "$TARGET_SCOPE_ACTUAL"
+  )" || die "$RUN_RECORD_REASON"
+
   TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_repo)" || die "missing_target_repo"
   git -C "$TARGET_REPO" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
 else

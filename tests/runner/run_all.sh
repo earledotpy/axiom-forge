@@ -288,6 +288,20 @@ TARGET_BASE_SHA="$(git -C "$TARGET_REPO" rev-parse HEAD)"
 write_target_gate_config "$TARGET_REPO"
 hide_gate_config_change
 
+expect_runner_fail \
+  "R8i_target_mode_missing_scope_sidecar_fails_closed" \
+  "missing_target_task_scope" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/missing-scope-fixture.task.md
+
+expect_runner_fail \
+  "R8j_target_mode_empty_scope_sidecar_fails_closed" \
+  "empty_target_task_scope" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/empty-scope-fixture.task.md
+
+expect_runner_fail \
+  "R8k_target_mode_invalid_scope_sidecar_fails_closed" \
+  "invalid_target_task_scope" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/invalid-scope-fixture.task.md
 : > "$FORGE_DIRTY_SENTINEL"
 expect_runner_fail \
   "R8c_target_mode_dirty_forge_records_failed_evidence" \
@@ -372,6 +386,8 @@ assert Path(record["target_repo"]).resolve() == Path(sys.argv[3]).resolve()
 assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == sys.argv[2]
 assert record["base_sha"] == sys.argv[2]
+assert record["target_scope_file"] == "allowed-paths.txt"
+assert record["target_scope_sha256"]
 PY
 then
   pass "R8a_target_mode_records_target_identity"
@@ -381,6 +397,7 @@ else
 fi
 
 if [[ -s "runs/$RUN_ID/patch.diff" ]] \
+  && [[ -s "runs/$RUN_ID/allowed-paths.txt" ]] \
   && [[ ! -e "$TARGET_REPO/runs/$RUN_ID" ]] \
   && [[ -z "$(git -C "$TARGET_REPO" status --porcelain)" ]]; then
   pass "R8b_target_mode_keeps_evidence_in_forge_and_target_clean"

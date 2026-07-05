@@ -53,6 +53,8 @@ TARGET_BASE_SHA=""
 TARGET_REMOTE_URL=""
 TARGET_PREFLIGHT_JSON="$RUN_DIR/target-preflight.json"
 TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
+TARGET_SCOPE_FILE=""
+TARGET_SCOPE_SHA256=""
 FORGE_HEAD_BEFORE=""
 FORGE_BRANCHES_BEFORE=""
 FORGE_STATUS_BEFORE=""
@@ -84,9 +86,57 @@ write_record() {
     --target-base-branch "$TARGET_BASE_BRANCH" \
     --target-base-sha "$TARGET_BASE_SHA" \
     --target-remote-url "$TARGET_REMOTE_URL" \
+    --target-scope-file "$TARGET_SCOPE_FILE" \
+    --target-scope-sha256 "$TARGET_SCOPE_SHA256" \
     --failure-reason "$reason"
 }
 
+
+target_scope_sidecar_path() {
+  local task_file="$1"
+  [[ "$task_file" == *.task.md ]] || return 1
+  printf '%s.allowed-paths.txt\n' "${task_file%.task.md}"
+}
+
+validate_and_copy_target_scope() {
+  local sidecar="$1"
+  local reason=""
+  local status=0
+
+  if [[ ! -e "$sidecar" ]]; then
+    fail_run "missing_target_task_scope"
+  fi
+
+  set +e
+  reason="$(python - "$sidecar" <<'PY'
+from pathlib import Path
+import sys
+from scripts import target_task_scope
+
+try:
+    target_task_scope.load_scope_sidecar(Path(sys.argv[1]))
+except target_task_scope.TargetTaskScopeError as exc:
+    print(exc.reason)
+    raise SystemExit(1)
+PY
+)"
+  status=$?
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    case "$reason" in
+      target_scope_sidecar_missing) fail_run "missing_target_task_scope" ;;
+      target_scope_empty) fail_run "empty_target_task_scope" ;;
+      *) fail_run "invalid_target_task_scope" ;;
+    esac
+  fi
+
+  cp "$sidecar" "$RUN_DIR/allowed-paths.txt" || fail_run "target_task_scope_copy_failed"
+  [[ -s "$RUN_DIR/allowed-paths.txt" ]] || fail_run "empty_target_task_scope"
+  TARGET_SCOPE_FILE="allowed-paths.txt"
+  TARGET_SCOPE_SHA256="$(python "$SCRIPT_DIR/sha256_file.py" "$RUN_DIR/allowed-paths.txt")" \
+    || fail_run "target_task_scope_sha256_compute_failed"
+}
 read_cli_provenance() {
   [[ -e "$CLI_PROVENANCE_FILE" ]] || return 0
 
@@ -117,6 +167,10 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
   if [[ -n "$(git status --porcelain)" ]]; then
     fail_run "forge_repo_dirty"
   fi
+
+  TARGET_SCOPE_SOURCE="$(target_scope_sidecar_path "$TASK_FILE")" \
+    || fail_run "invalid_target_task_scope"
+  validate_and_copy_target_scope "$TARGET_SCOPE_SOURCE"
 
   if python "$SCRIPT_DIR/target_preflight.py" \
     --config "$ROOT/gate.toml" \

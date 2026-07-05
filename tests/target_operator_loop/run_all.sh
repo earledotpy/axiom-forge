@@ -158,6 +158,8 @@ assert Path(record["target_repo"]).resolve() == target_repo
 assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == base_sha
 assert record["base_sha"] == base_sha
+assert record["target_scope_file"] == "allowed-paths.txt"
+assert record["target_scope_sha256"]
 PY
   then
     pass "L5_operator_can_inspect_target_identity_before_promotion"
@@ -168,6 +170,7 @@ PY
 
   if [[ -s "runs/$RUN_ID/patch.diff" \
     && -s "runs/$RUN_ID/target-preflight.json" \
+    && -s "runs/$RUN_ID/allowed-paths.txt" \
     && -s "runs/$RUN_ID/verify.json" \
     && ! -e "$TARGET_REPO/runs/$RUN_ID" \
     && -z "$(git -C "$TARGET_REPO" status --porcelain)" \

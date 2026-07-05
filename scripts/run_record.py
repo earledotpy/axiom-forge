@@ -46,6 +46,8 @@ def build_record(
     target_base_branch="",
     target_base_sha="",
     target_remote_url="",
+    target_scope_file="",
+    target_scope_sha256="",
 ):
     return {
         "schema_version": STRICT_SCHEMA_VERSION,
@@ -57,6 +59,8 @@ def build_record(
         "target_base_branch": clean(target_base_branch),
         "target_base_sha": clean(target_base_sha),
         "target_remote_url": clean(target_remote_url),
+        "target_scope_file": clean(target_scope_file),
+        "target_scope_sha256": clean(target_scope_sha256),
         "base_sha": base_sha,
         "task_file": clean(task_file),
         "patch_file": clean(patch_file),
@@ -90,7 +94,13 @@ def _required_non_empty_string(record, key, reason):
     return value
 
 
-def validate_completed_record(record, *, run_dir_name=None, patch_sha256_actual=None):
+def validate_completed_record(
+    record,
+    *,
+    run_dir_name=None,
+    patch_sha256_actual=None,
+    target_scope_sha256_actual=None,
+):
     if not isinstance(record, dict):
         raise RunRecordError("missing_run_id")
 
@@ -115,6 +125,20 @@ def validate_completed_record(record, *, run_dir_name=None, patch_sha256_actual=
         _required_non_empty_string(record, "target_base_branch", "missing_target_base_branch")
         target_base_sha = _required_non_empty_string(record, "target_base_sha", "missing_target_base_sha")
         _required_non_empty_string(record, "target_remote_url", "missing_target_remote_url")
+        target_scope_file = _required_non_empty_string(
+            record,
+            "target_scope_file",
+            "missing_target_scope_file",
+        )
+        if target_scope_file != "allowed-paths.txt":
+            raise RunRecordError("invalid_target_scope_file")
+        target_scope_sha256 = _required_non_empty_string(
+            record,
+            "target_scope_sha256",
+            "missing_target_scope_sha256",
+        )
+        if target_scope_sha256_actual is not None and target_scope_sha256 != target_scope_sha256_actual:
+            raise RunRecordError("target_scope_sha256_mismatch")
         if target_base_sha != base_sha:
             raise RunRecordError("target_base_sha_mismatch")
 
@@ -145,6 +169,8 @@ def _add_record_args(parser):
     parser.add_argument("--target-base-branch", default="")
     parser.add_argument("--target-base-sha", default="")
     parser.add_argument("--target-remote-url", default="")
+    parser.add_argument("--target-scope-file", default="")
+    parser.add_argument("--target-scope-sha256", default="")
 
 
 def main():
@@ -158,6 +184,7 @@ def main():
     validate_parser.add_argument("--record", required=True)
     validate_parser.add_argument("--run-dir-name", required=True)
     validate_parser.add_argument("--patch-sha256-actual", default="")
+    validate_parser.add_argument("--target-scope-sha256-actual", default="")
 
     args = parser.parse_args()
 
@@ -181,6 +208,8 @@ def main():
             target_base_branch=args.target_base_branch,
             target_base_sha=args.target_base_sha,
             target_remote_url=args.target_remote_url,
+            target_scope_file=args.target_scope_file,
+            target_scope_sha256=args.target_scope_sha256,
         )
         return 0
 
@@ -191,6 +220,7 @@ def main():
                 record,
                 run_dir_name=args.run_dir_name,
                 patch_sha256_actual=clean(args.patch_sha256_actual),
+                target_scope_sha256_actual=clean(args.target_scope_sha256_actual),
             )
         except (OSError, json.JSONDecodeError):
             print("missing_run_id")

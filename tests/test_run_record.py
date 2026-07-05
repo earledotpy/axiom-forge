@@ -148,9 +148,66 @@ class RunRecordTests(unittest.TestCase):
             "target_base_branch": "main",
             "target_base_sha": "abc123",
             "target_remote_url": "https://example.test/target.git",
+            "target_scope_file": "allowed-paths.txt",
+            "target_scope_sha256": "scope-hash",
         }
 
         validated = run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(validated["base_sha"], "abc123")
+
+
+    def test_target_mode_validation_requires_scope_fields(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_name": "axiom",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(caught.exception.reason, "missing_target_scope_file")
+
+    def test_target_mode_validation_rejects_scope_hash_mismatch(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_name": "axiom",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+            "target_scope_file": "allowed-paths.txt",
+            "target_scope_sha256": "expected",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(
+                record,
+                run_dir_name="target-run",
+                target_scope_sha256_actual="actual",
+            )
+
+        self.assertEqual(caught.exception.reason, "target_scope_sha256_mismatch")
+
+    def test_forge_local_validation_does_not_require_scope_fields(self):
+        record = {
+            "run_id": "forge-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "forge-local",
+        }
+
+        validated = run_record.validate_completed_record(record, run_dir_name="forge-run")
 
         self.assertEqual(validated["base_sha"], "abc123")
 

@@ -144,6 +144,7 @@ write_target_run() {
   local repo="$2"
   local base_sha
   local patch_sha
+  local scope_sha
 
   base_sha="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "runs/$run_id"
@@ -158,14 +159,16 @@ diff --git a/app/target.py b/app/target.py
 +    return "after"
 PATCH
   patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
+  printf 'app/target.py\n' > "runs/$run_id/allowed-paths.txt"
+  scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "$base_sha" "$patch_sha" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, base_sha, patch_sha = sys.argv[1:]
+record_path, run_id, repo, base_sha, patch_sha, scope_sha = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -176,6 +179,8 @@ record = {
     "target_base_branch": "main",
     "target_base_sha": base_sha,
     "target_remote_url": "https://example.test/target.git",
+    "target_scope_file": "allowed-paths.txt",
+    "target_scope_sha256": scope_sha,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -190,7 +195,6 @@ record = {
 Path(record_path).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 PY
 }
-
 expect_fail() {
   local name="$1"
   shift

@@ -81,6 +81,7 @@ write_target_run() {
   local target_name="${3:-test-target}"
   local base_sha
   local patch_sha
+  local scope_sha
 
   base_sha="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "runs/$run_id"
@@ -95,14 +96,16 @@ diff --git a/app/target.py b/app/target.py
 +    return "after"
 PATCH
   patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
+  printf 'app/target.py\n' > "runs/$run_id/allowed-paths.txt"
+  scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, target_name, base_sha, patch_sha = sys.argv[1:]
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -113,6 +116,8 @@ record = {
     "target_base_branch": "main",
     "target_base_sha": base_sha,
     "target_remote_url": "https://example.test/target.git",
+    "target_scope_file": "allowed-paths.txt",
+    "target_scope_sha256": scope_sha,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -127,7 +132,6 @@ record = {
 Path(record_path).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 PY
 }
-
 write_forge_local_run() {
   local run_id="$1"
   local base_sha
@@ -202,6 +206,19 @@ TARGET_REPO="$TMPDIR/target"
 make_target_repo "$TARGET_REPO"
 write_gate_config "$TARGET_REPO" '"python", "check_target.py"'
 
+write_target_run "target-verify-missing-scope-copy" "$TARGET_REPO"
+rm -f runs/target-verify-missing-scope-copy/allowed-paths.txt
+expect_fail_reason \
+  "V0a_target_run_validation_requires_copied_scope_file" \
+  "missing_or_empty_target_scope_file" \
+  bash scripts/validate_run_dir.sh runs/target-verify-missing-scope-copy
+
+write_target_run "target-verify-scope-hash-mismatch" "$TARGET_REPO"
+printf 'app/other.py\n' > runs/target-verify-scope-hash-mismatch/allowed-paths.txt
+expect_fail_reason \
+  "V0b_target_run_validation_rejects_scope_hash_mismatch" \
+  "target_scope_sha256_mismatch" \
+  bash scripts/validate_run_dir.sh runs/target-verify-scope-hash-mismatch
 write_target_run "target-verify-success" "$TARGET_REPO"
 expect_fail_reason \
   "V1_target_run_requires_explicit_flag" \

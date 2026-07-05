@@ -22,6 +22,8 @@ parser.add_argument("--target-name", default="")
 parser.add_argument("--target-base-branch", default="")
 parser.add_argument("--target-base-sha", default="")
 parser.add_argument("--target-remote-url", default="")
+parser.add_argument("--target-scope-file", default="")
+parser.add_argument("--target-scope-sha256", default="")
 args = parser.parse_args()
 
 write_record(
@@ -43,4 +45,6 @@ write_record(
     target_base_branch=args.target_base_branch,
     target_base_sha=args.target_base_sha,
     target_remote_url=args.target_remote_url,
+    target_scope_file=args.target_scope_file,
+    target_scope_sha256=args.target_scope_sha256,
 )
