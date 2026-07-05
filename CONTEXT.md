@@ -16,6 +16,10 @@ _Avoid_: qualification run, acceptance test
 The evidence directory produced from one agent invocation, including its run record and patch. A captured run may be verified without being promoted.
 _Avoid_: execution, job
 
+**Superseded captured run**:
+A captured run preserved as evidence after the operator reruns its task from a newer approved target base or replacement delegation artifact set. It is visible in task history but is not a promotable input.
+_Avoid_: deleted run, hidden failure, current run
+
 **Target-mode captured run**:
 A captured run produced with explicit target mode, where the patch applies to the configured external target repository while the run evidence remains Forge-owned.
 _Avoid_: target execution, external job
@@ -27,6 +31,10 @@ _Avoid_: log, qualification report, promotion record
 **Verified patch**:
 A captured run's patch that passes run-directory validation and patch verification from its recorded base in a fresh detached worktree. Verification does not approve or promote the patch.
 _Avoid_: approved patch, promoted patch
+
+**Promotion-ready patch**:
+A verified patch with a passing promotion review result, a non-stale delegation target base, and satisfied approved scope and acceptance evidence. Promotion-ready does not itself promote the patch; explicit operator approval is still required.
+_Avoid_: verified patch, automatically approved patch, promoted patch
 
 **External target repository**:
 A repository outside the Axiom Forge checkout that Axiom Forge is asked to modify through captured runs, verified patches, and explicit promotion.
@@ -44,6 +52,26 @@ _Avoid_: repeated target path argument, implicit working directory target
 Captured run, verification, and promotion records stored by Axiom Forge for an external target repository run rather than committed into the target repository source tree.
 _Avoid_: target-owned run evidence, application source evidence files
 
+**Operator evidence summary**:
+The UI-facing summary of structured evidence for a task, including task intent, approved scope, adapter, patch, verification status, review status, and promotion state. Raw adapter logs are supporting drill-down material, not the primary operator view.
+_Avoid_: terminal transcript, chat log, raw run output
+
+**Promotion review**:
+A planner or operator review of a verified patch before promotion. It is required even when the patch passes its deterministic acceptance check, because acceptance proves only the bounded task behavior.
+_Avoid_: automatic approval, acceptance-only promotion, adapter self-review
+
+**Promotion review result**:
+The committed structured evidence produced by promotion-review mode for a verified patch, recording reviewer identity, reviewed run or patch, decision, concerns or no-concerns statement, and any follow-up bounded patch tasks. A conversational approval alone is not a promotion review result.
+_Avoid_: looks-good comment, chat approval, informal review note
+
+**Promotion review revision**:
+The Forge commit SHA identifying the exact committed promotion review result used for a promotion. It lets promotion evidence point back to the reviewed patch decision it relied on.
+_Avoid_: latest review, chat approval, implicit review evidence
+
+**Review-requested refactor**:
+A refactoring change identified during promotion review. It becomes a separate bounded patch task unless it is a tiny fix within the same operator-approved scope.
+_Avoid_: unbounded review fix, hidden second implementation, scope expansion
+
 **Target promotion**:
 Promotion of a verified patch onto a gate branch in the external target repository while Axiom Forge retains the promotion evidence.
 _Avoid_: Forge-repo promotion, direct main update
@@ -52,9 +80,77 @@ _Avoid_: Forge-repo promotion, direct main update
 The external target repository's configured checks run by Axiom Forge in a disposable verifier worktree to verify a captured patch for that target.
 _Avoid_: Forge health check, adapter qualification acceptance
 
+**Delegation target base**:
+The operator-approved target repository base SHA that a delegation-ready task is intended to modify. The UI may propose it from the configured target branch and warn if it becomes stale before delegation; promotion treats a stale target base as a fail-closed blocker resolved by rerunning from a newly approved base, not by silently rebasing the captured patch. It is distinct from the delegation artifact revision, which identifies the Forge commit containing the approved task, scope, and acceptance check.
+_Avoid_: Forge revision, latest target branch, implicit base
+
 **Target task scope**:
 The operator-controlled list of external target repository paths a target-mode captured run may modify. A target-mode patch outside this list fails closed before target promotion.
 _Avoid_: implied target scope, broad target task
+
+**Draft task scope**:
+A planner-proposed list of paths for a bounded patch task before operator approval. It is not adapter authority until the operator accepts or revises it into the target task scope.
+_Avoid_: approved scope, implicit scope, adapter-selected scope
+
+**Planning source of truth**:
+The GitHub Issues and project docs that hold high-level plans, PRDs, and decomposed task intent. Forge reads from this source but owns only the delegation artifacts and evidence needed for patch gating.
+_Avoid_: Forge project database, UI-only plan, duplicated PRD store
+
+**Planner role**:
+The authority that turns a high-level plan into bounded patch tasks for adapters. It may draft task files and task scopes, but implementation adapters do not hold this role.
+_Avoid_: implementation adapter, autonomous agent, router
+
+**Planner conversation**:
+The UI-supported conversational workflow for a planner role, separated into task-drafting mode and promotion-review mode. It is distinct from delegated adapter interaction, which is non-chat implementation through approved tasks and captured results.
+_Avoid_: adapter chat, implementation steering, raw CLI session
+
+**Operator-approved acceptance check**:
+A deterministic acceptance check drafted for a bounded patch task and accepted by the operator as proving the requested behavior. It lives outside the adapter's allowed path scope and is required before implementation delegation.
+_Avoid_: planner-only check, adapter-selected check, manual review
+
+**Operator-directed retry**:
+A deliberate planner or operator choice to rerun a delegation-ready task after a failed captured run. Forge records the failure as evidence but does not automatically reroute the task to another adapter.
+_Avoid_: automatic fallback, quota router, silent retry
+
+**Adapter availability failure**:
+A failed captured run whose failure reason indicates the selected adapter was unavailable or out of quota before implementation correctness could be judged. It remains run evidence, but it is distinct from unsafe behavior or task-incorrect implementation.
+_Avoid_: unsafe adapter failure, incorrect implementation, quota hint
+
+**Adapter availability hint**:
+Operator-visible information about whether an adapter may currently be usable, such as recent quota or availability signals. It is advisory only and is not trusted evidence for verification, promotion, or automatic routing.
+_Avoid_: trusted quota state, routing decision, capacity guarantee
+
+**Draft adapter selection**:
+A planner or operator preference for which adapter might receive a bounded patch task. It is planning metadata only and does not delegate work until the task is delegation-ready.
+_Avoid_: delegated run, adapter assignment, automatic routing
+
+**Delegated adapter interaction**:
+The permitted UI interaction model for implementation adapters: the operator delegates an approved task and inspects captured results. The UI may show run status and logs, but it does not provide live chat or mid-run steering for the adapter.
+_Avoid_: live adapter chat, interactive steering, informal instruction update
+
+**Concurrent task scope conflict**:
+An overlap between the operator-approved scopes of active delegation-ready tasks. It must be resolved before parallel delegation so each captured run remains attributable to one bounded task.
+_Avoid_: shared task scope, parallel file overlap, implicit merge conflict
+
+**Draft task artifact**:
+An operator-editable task draft produced from planning source material before it becomes a runnable task file. It may include proposed behavior, draft task scope, acceptance check, and draft adapter selection, but it is not adapter-facing authority.
+_Avoid_: runnable task file, delegated task, hidden plan state
+
+**Delegation artifact set**:
+The committed runnable task file, approved path-scope sidecar, and operator-approved acceptance check created together from an approved draft task artifact. The set must stay synchronized because it is the adapter-facing delegation authority; changes return it to draft state and require regeneration.
+_Avoid_: partial task files, separate approval outputs, unsynchronized delegation files
+
+**Delegation artifact revision**:
+The Forge commit SHA identifying the exact committed delegation artifact set used for a captured run. It lets run evidence point back to the approved task, scope, and acceptance check the adapter received.
+_Avoid_: local draft version, latest task file, implicit approval revision
+
+**Delegation-ready task**:
+A bounded patch task with operator-approved scope and a deterministic acceptance check. Implementation adapters may receive only delegation-ready tasks.
+_Avoid_: unchecked task, review-only task, informal task
+
+**Bounded patch task**:
+A planner-authored task sized as the largest meaningful patch that still has clear scope and deterministic acceptance. It specifies desired behavior and constraints without prescribing implementation unless necessary, and delegates implementation only, not planning authority, review authority, or promotion authority.
+_Avoid_: high-level goal, autonomous workflow, free-form agent job
 
 **Registered adapter**:
 An adapter listed in the Axiom Forge adapter inventory. Registration is distinct from one successful captured run and does not itself imply standard status or trust.
