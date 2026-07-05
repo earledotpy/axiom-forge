@@ -182,26 +182,48 @@ PY
     find "$TARGET_REPO" -maxdepth 2 -type d -name runs -print >&2 || true
   fi
 
+  if python - "runs/$RUN_ID/allowed-paths.txt" "runs/$RUN_ID/verify.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+scope_lines = [
+    line.strip()
+    for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.strip().startswith("#")
+]
+verify = json.load(open(sys.argv[2], encoding="utf-8"))
+assert scope_lines == ["app/target.py"]
+assert verify["status"] == "PASS"
+PY
+  then
+    pass "L7_valid_scoped_target_run_remains_promotion_eligible"
+  else
+    fail "L7_valid_scoped_target_run_remains_promotion_eligible"
+    cat "runs/$RUN_ID/allowed-paths.txt" >&2
+    cat "runs/$RUN_ID/verify.json" >&2
+  fi
+
   expect_pass \
-    "L7_target_promotion_succeeds_with_explicit_flag" \
+    "L8_target_promotion_succeeds_with_explicit_flag" \
     bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
 
   if git -C "$TARGET_REPO" show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
-    pass "L8_gate_branch_created_in_external_target_repository"
+    pass "L9_gate_branch_created_in_external_target_repository"
   else
-    fail "L8_gate_branch_created_in_external_target_repository"
+    fail "L9_gate_branch_created_in_external_target_repository"
   fi
 
   if git show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
-    fail "L9_gate_branch_not_created_in_forge_repository"
+    fail "L10_gate_branch_not_created_in_forge_repository"
   else
-    pass "L9_gate_branch_not_created_in_forge_repository"
+    pass "L10_gate_branch_not_created_in_forge_repository"
   fi
 
   if [[ "$(git -C "$TARGET_REPO" rev-parse main)" == "$TARGET_MAIN_BEFORE" ]]; then
-    pass "L10_target_main_remains_unchanged"
+    pass "L11_target_main_remains_unchanged"
   else
-    fail "L10_target_main_remains_unchanged"
+    fail "L11_target_main_remains_unchanged"
   fi
 
   if python - "runs/$RUN_ID/promotion.json" "$TARGET_REPO" <<'PY'
@@ -218,9 +240,9 @@ assert promotion["branch"].startswith("gate/")
 assert promotion["promotion_commit"]
 PY
   then
-    pass "L11_promotion_record_remains_forge_owned"
+    pass "L12_promotion_record_remains_forge_owned"
   else
-    fail "L11_promotion_record_remains_forge_owned"
+    fail "L12_promotion_record_remains_forge_owned"
     cat "runs/$RUN_ID/promotion.json" >&2
   fi
 fi

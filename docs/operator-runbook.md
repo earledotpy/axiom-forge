@@ -118,6 +118,28 @@ RUN_ID="<run-id>"
 
 In target mode, task files and captured run evidence remain Forge-owned under `runs/<run-id>/`. The external target repository is used to create the disposable agent worktree and later receives the promoted `gate/<run-id>` branch during target promotion.
 
+Each target-mode task needs a target task scope sidecar beside it. A task named:
+
+```text
+tasks/<name>.task.md
+```
+
+must have:
+
+```text
+tasks/<name>.allowed-paths.txt
+```
+
+The sidecar lists exact target-repository-relative file paths, one per line, using forward slashes:
+
+```text
+# optional comment
+app/target.py
+docs/usage.md
+```
+
+Blank lines and lines beginning with `#` are ignored. Absolute paths, `..` traversal, globs, directory entries, and backslash-separated paths are invalid.
+
 Set the run id:
 
 ```bash
@@ -164,7 +186,10 @@ target_repo points to the external target repository
 target_base_branch is the expected target base branch
 target_base_sha matches the recorded base_sha
 target_remote_url is the expected origin URL
+target_scope_file is allowed-paths.txt
+target_scope_sha256 is present
 target-preflight.json exists under runs/<run-id>/
+runs/<run-id>/allowed-paths.txt exists and matches the recorded target_scope_sha256
 ```
 
 Review remains operator-driven for the first milestone. There is no formal review-record artifact yet; inspect `record.json`, `patch.diff`, `verify.json`, and the relevant target repository diff before promotion.
@@ -198,6 +223,18 @@ Common verification failures:
 patch_check_failed       patch does not apply cleanly or has whitespace errors
 VERIFY_TARGET failure    patch applies but target verification fails
 stale base SHA           run was produced against a base that is no longer current
+patch_outside_target_task_scope
+                         target-mode patch touches a path not listed in the captured sidecar
+```
+
+Common target task scope failures:
+
+```text
+missing_target_task_scope          task sidecar is missing before target capture
+empty_target_task_scope            task sidecar has no usable path entries
+invalid_target_task_scope          task sidecar syntax is invalid
+missing_or_empty_target_scope_file copied run evidence is missing during validation
+target_scope_sha256_mismatch       copied scope evidence no longer matches record.json
 ```
 
 ## Check A Candidate Adapter

@@ -352,7 +352,7 @@ expect_pass \
 
 write_target_run_from_clone "target-scope-out-of-scope" "$TARGET_REPO" "app/target.py" "modify_other"
 expect_fail_reason \
-  "V3c_target_scope_rejects_out_of_scope_path" \
+  "V3c_out_of_scope_target_patch_cannot_pass_target_verification" \
   "patch_outside_target_task_scope" \
   bash scripts/verify_patch.sh --target runs/target-scope-out-of-scope
 

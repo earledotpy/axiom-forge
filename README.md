@@ -45,6 +45,8 @@ Axiom Forge captures their output as artifacts and promotes only through the gat
 
 In target mode, the external target repository receives only source changes from the promoted patch. Forge-owned task files, run records, logs, verification results, and promotion records remain in the Forge checkout under `runs/`.
 
+Target-mode tasks must include a Forge-owned target task scope sidecar next to the task file. A task named `tasks/<name>.task.md` pairs with `tasks/<name>.allowed-paths.txt`. The sidecar contains exact target-repository-relative file paths, one per line, using forward slashes. Blank lines are ignored, and lines beginning with `#` are comments.
+
 Failed runs are evidence. They are not promotable inputs.
 
 ## Configured Target Repository
@@ -199,6 +201,7 @@ scripts/
 
 tasks/
   *.task.md                         # operator-authored tasks for real agent runs
+  *.allowed-paths.txt               # target-mode sidecars listing exact allowed target paths
 
 tests/
   gate_contract/run_all.sh          # static gate-contract matrix
@@ -290,6 +293,17 @@ Target-mode completed records also include target identity fields:
   "base_sha": "<same target base sha>"
 }
 ```
+
+They also include captured target task scope evidence:
+
+```json
+{
+  "target_scope_file": "allowed-paths.txt",
+  "target_scope_sha256": "<sha256 of runs/<run-id>/allowed-paths.txt>"
+}
+```
+
+Target task scope sidecars are fail-closed. Target-mode capture rejects a missing sidecar with `missing_target_task_scope`, an empty sidecar with `empty_target_task_scope`, and invalid syntax with `invalid_target_task_scope`. Target-mode run validation rejects missing copied scope evidence with `missing_or_empty_target_scope_file` and hash drift with `target_scope_sha256_mismatch`. Target-mode verification rejects patches that touch files outside the captured sidecar with `patch_outside_target_task_scope`.
 
 ## Verification Contract
 
