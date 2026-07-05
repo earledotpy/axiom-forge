@@ -60,7 +60,7 @@ expected_remote_url = "https://github.com/earledotpy/axiom.git"
 
 [target.primary.verify]
 command = ["python", "-m", "pytest"]
-timeout_seconds = 300
+timeout_seconds = 900
 ```
 
 The target preflight is local and fail-closed. It validates the configured path, Git root, `origin` URL, current branch, clean working tree, base SHA, and target verification command:
