@@ -52,6 +52,10 @@ _Avoid_: Forge-repo promotion, direct main update
 The external target repository's configured checks run by Axiom Forge in a disposable verifier worktree to verify a captured patch for that target.
 _Avoid_: Forge health check, adapter qualification acceptance
 
+**Target task scope**:
+The operator-controlled list of external target repository paths a target-mode captured run may modify. A target-mode patch outside this list fails closed before target promotion.
+_Avoid_: implied target scope, broad target task
+
 **Registered adapter**:
 An adapter listed in the Axiom Forge adapter inventory. Registration is distinct from one successful captured run and does not itself imply standard status or trust.
 _Avoid_: approved adapter, trusted agent
