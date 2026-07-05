@@ -150,6 +150,7 @@ class RunRecordTests(unittest.TestCase):
             "target_remote_url": "https://example.test/target.git",
             "target_scope_file": "allowed-paths.txt",
             "target_scope_sha256": "scope-hash",
+            "delegation_artifact_revision": "0123456789abcdef0123456789abcdef01234567",
         }
 
         validated = run_record.validate_completed_record(record, run_dir_name="target-run")
@@ -175,6 +176,47 @@ class RunRecordTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.reason, "missing_target_scope_file")
 
+
+    def test_target_mode_validation_requires_delegation_artifact_revision(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_name": "axiom",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+            "target_scope_file": "allowed-paths.txt",
+            "target_scope_sha256": "scope-hash",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(caught.exception.reason, "missing_delegation_artifact_revision")
+
+    def test_target_mode_validation_rejects_malformed_delegation_artifact_revision(self):
+        record = {
+            "run_id": "target-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "run_mode": "target",
+            "target_name": "axiom",
+            "target_repo": "/tmp/target",
+            "target_base_branch": "main",
+            "target_base_sha": "abc123",
+            "target_remote_url": "https://example.test/target.git",
+            "target_scope_file": "allowed-paths.txt",
+            "target_scope_sha256": "scope-hash",
+            "delegation_artifact_revision": "abc123",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.validate_completed_record(record, run_dir_name="target-run")
+
+        self.assertEqual(caught.exception.reason, "malformed_delegation_artifact_revision")
     def test_target_mode_validation_rejects_scope_hash_mismatch(self):
         record = {
             "run_id": "target-run",

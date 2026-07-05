@@ -11,6 +11,7 @@ COMPLETED = "COMPLETED"
 FAILED = "FAILED"
 
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class RunRecordError(Exception):
@@ -48,6 +49,7 @@ def build_record(
     target_remote_url="",
     target_scope_file="",
     target_scope_sha256="",
+    delegation_artifact_revision="",
 ):
     return {
         "schema_version": STRICT_SCHEMA_VERSION,
@@ -61,6 +63,7 @@ def build_record(
         "target_remote_url": clean(target_remote_url),
         "target_scope_file": clean(target_scope_file),
         "target_scope_sha256": clean(target_scope_sha256),
+        "delegation_artifact_revision": clean(delegation_artifact_revision),
         "base_sha": base_sha,
         "task_file": clean(task_file),
         "patch_file": clean(patch_file),
@@ -91,6 +94,13 @@ def _required_non_empty_string(record, key, reason):
     value = record.get(key)
     if not isinstance(value, str) or value == "":
         raise RunRecordError(reason)
+    return value
+
+
+def _required_full_commit_sha(record, key, missing_reason, malformed_reason):
+    value = _required_non_empty_string(record, key, missing_reason)
+    if _FULL_COMMIT_SHA.fullmatch(value) is None:
+        raise RunRecordError(malformed_reason)
     return value
 
 
@@ -141,6 +151,12 @@ def validate_completed_record(
             raise RunRecordError("target_scope_sha256_mismatch")
         if target_base_sha != base_sha:
             raise RunRecordError("target_base_sha_mismatch")
+        _required_full_commit_sha(
+            record,
+            "delegation_artifact_revision",
+            "missing_delegation_artifact_revision",
+            "malformed_delegation_artifact_revision",
+        )
 
     patch_sha256_expected = record.get("patch_sha256")
     if patch_sha256_expected not in (None, "") and patch_sha256_actual is not None:
@@ -171,6 +187,7 @@ def _add_record_args(parser):
     parser.add_argument("--target-remote-url", default="")
     parser.add_argument("--target-scope-file", default="")
     parser.add_argument("--target-scope-sha256", default="")
+    parser.add_argument("--delegation-artifact-revision", default="")
 
 
 def main():
@@ -210,6 +227,7 @@ def main():
             target_remote_url=args.target_remote_url,
             target_scope_file=args.target_scope_file,
             target_scope_sha256=args.target_scope_sha256,
+            delegation_artifact_revision=args.delegation_artifact_revision,
         )
         return 0
 

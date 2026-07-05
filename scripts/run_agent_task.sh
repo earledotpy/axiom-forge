@@ -55,6 +55,7 @@ TARGET_PREFLIGHT_JSON="$RUN_DIR/target-preflight.json"
 TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
 TARGET_SCOPE_FILE=""
 TARGET_SCOPE_SHA256=""
+DELEGATION_ARTIFACT_REVISION=""
 FORGE_HEAD_BEFORE=""
 FORGE_BRANCHES_BEFORE=""
 FORGE_STATUS_BEFORE=""
@@ -88,6 +89,7 @@ write_record() {
     --target-remote-url "$TARGET_REMOTE_URL" \
     --target-scope-file "$TARGET_SCOPE_FILE" \
     --target-scope-sha256 "$TARGET_SCOPE_SHA256" \
+    --delegation-artifact-revision "$DELEGATION_ARTIFACT_REVISION" \
     --failure-reason "$reason"
 }
 
@@ -167,6 +169,9 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
   if [[ -n "$(git status --porcelain)" ]]; then
     fail_run "forge_repo_dirty"
   fi
+
+  DELEGATION_ARTIFACT_REVISION="$(git -C "$ROOT" rev-parse HEAD)" \
+    || fail_run "delegation_artifact_revision_unresolved"
 
   TARGET_SCOPE_SOURCE="$(target_scope_sidecar_path "$TASK_FILE")" \
     || fail_run "invalid_target_task_scope"

@@ -95,6 +95,7 @@ write_target_run() {
   local base_sha
   local patch_sha
   local scope_sha
+  local forge_revision
 
   base_sha="$(git -C "$repo" rev-parse HEAD)"
   mkdir -p "runs/$run_id"
@@ -111,14 +112,15 @@ PATCH
   patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
   printf 'app/target.py\n' > "runs/$run_id/allowed-paths.txt"
   scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
+  forge_revision="$(git rev-parse HEAD)"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "$target_name" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha = sys.argv[1:]
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -131,6 +133,7 @@ record = {
     "target_remote_url": "https://example.test/target.git",
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
+    "delegation_artifact_revision": forge_revision,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -154,6 +157,7 @@ write_target_run_from_clone() {
   local base_sha
   local patch_sha
   local scope_sha
+  local forge_revision
 
   base_sha="$(git -C "$repo" rev-parse HEAD)"
   git clone -q "$repo" "$work"
@@ -193,14 +197,15 @@ PY
   patch_sha="$(python scripts/sha256_file.py "runs/$run_id/patch.diff")"
   printf '%s\n' "$scope_text" > "runs/$run_id/allowed-paths.txt"
   scope_sha="$(python scripts/sha256_file.py "runs/$run_id/allowed-paths.txt")"
+  forge_revision="$(git rev-parse HEAD)"
 
-  python - "runs/$run_id/record.json" "$run_id" "$repo" "test-target" "$base_sha" "$patch_sha" "$scope_sha" <<'PY'
+  python - "runs/$run_id/record.json" "$run_id" "$repo" "test-target" "$base_sha" "$patch_sha" "$scope_sha" "$forge_revision" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha = sys.argv[1:]
+record_path, run_id, repo, target_name, base_sha, patch_sha, scope_sha, forge_revision = sys.argv[1:]
 record = {
     "schema_version": 2,
     "run_id": run_id,
@@ -213,6 +218,7 @@ record = {
     "target_remote_url": "https://example.test/target.git",
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
+    "delegation_artifact_revision": forge_revision,
     "base_sha": base_sha,
     "task_file": "task.md",
     "patch_file": "patch.diff",
@@ -314,6 +320,52 @@ expect_fail_reason \
   "V0b_target_run_validation_rejects_scope_hash_mismatch" \
   "target_scope_sha256_mismatch" \
   bash scripts/validate_run_dir.sh runs/target-verify-scope-hash-mismatch
+
+write_target_run "target-verify-missing-delegation-revision" "$TARGET_REPO"
+python - "runs/target-verify-missing-delegation-revision/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record.pop("delegation_artifact_revision", None)
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V0c_target_run_validation_requires_delegation_revision" \
+  "missing_delegation_artifact_revision" \
+  bash scripts/validate_run_dir.sh runs/target-verify-missing-delegation-revision
+
+write_target_run "target-verify-malformed-delegation-revision" "$TARGET_REPO"
+python - "runs/target-verify-malformed-delegation-revision/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record["delegation_artifact_revision"] = "abc123"
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V0d_target_run_validation_rejects_malformed_delegation_revision" \
+  "malformed_delegation_artifact_revision" \
+  bash scripts/validate_run_dir.sh runs/target-verify-malformed-delegation-revision
+
+write_target_run "target-verify-unresolved-delegation-revision" "$TARGET_REPO"
+python - "runs/target-verify-unresolved-delegation-revision/record.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+record = json.loads(path.read_text(encoding="utf-8"))
+record["delegation_artifact_revision"] = "0000000000000000000000000000000000000000"
+path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+PY
+expect_fail_reason \
+  "V0e_target_run_validation_rejects_unresolved_delegation_revision" \
+  "delegation_artifact_revision_not_found" \
+  bash scripts/validate_run_dir.sh runs/target-verify-unresolved-delegation-revision
+
 write_target_run "target-verify-success" "$TARGET_REPO"
 expect_fail_reason \
   "V1_target_run_requires_explicit_flag" \

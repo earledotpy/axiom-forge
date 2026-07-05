@@ -24,6 +24,7 @@ parser.add_argument("--target-base-sha", default="")
 parser.add_argument("--target-remote-url", default="")
 parser.add_argument("--target-scope-file", default="")
 parser.add_argument("--target-scope-sha256", default="")
+parser.add_argument("--delegation-artifact-revision", default="")
 args = parser.parse_args()
 
 write_record(
@@ -47,4 +48,5 @@ write_record(
     target_remote_url=args.target_remote_url,
     target_scope_file=args.target_scope_file,
     target_scope_sha256=args.target_scope_sha256,
+    delegation_artifact_revision=args.delegation_artifact_revision,
 )

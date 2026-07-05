@@ -144,7 +144,8 @@ if [[ -n "${RUN_ID:-}" ]]; then
     "L4_target_mode_patch_verifies" \
     bash scripts/verify_patch.sh --target "runs/$RUN_ID"
 
-  if python - "runs/$RUN_ID/record.json" "$TARGET_REPO" "$TARGET_MAIN_BEFORE" <<'PY'
+  FORGE_REVISION="$(git rev-parse HEAD)"
+  if python - "runs/$RUN_ID/record.json" "$TARGET_REPO" "$TARGET_MAIN_BEFORE" "$FORGE_REVISION" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -158,6 +159,7 @@ assert Path(record["target_repo"]).resolve() == target_repo
 assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == base_sha
 assert record["base_sha"] == base_sha
+assert record["delegation_artifact_revision"] == sys.argv[4]
 assert record["target_scope_file"] == "allowed-paths.txt"
 assert record["target_scope_sha256"]
 PY

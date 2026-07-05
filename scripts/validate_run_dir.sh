@@ -54,6 +54,9 @@ if [[ "$RUN_MODE" == "target" ]]; then
       --target-scope-sha256-actual "$TARGET_SCOPE_ACTUAL"
   )" || die "$RUN_RECORD_REASON"
 
+  DELEGATION_ARTIFACT_REVISION="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" delegation_artifact_revision)" || die "missing_delegation_artifact_revision"
+  git -C "$SCRIPT_DIR/.." cat-file -e "$DELEGATION_ARTIFACT_REVISION^{commit}" 2>/dev/null || die "delegation_artifact_revision_not_found"
+
   TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_repo)" || die "missing_target_repo"
   git -C "$TARGET_REPO" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
 else

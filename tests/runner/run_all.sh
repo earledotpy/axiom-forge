@@ -374,7 +374,8 @@ expect_runner_pass \
 
 RUN_ID="$(cat /tmp/axiom-runner-last-good-run)"
 
-if python - "runs/$RUN_ID/record.json" "$TARGET_BASE_SHA" "$TARGET_REPO" <<'PY'
+FORGE_REVISION="$(git rev-parse HEAD)"
+if python - "runs/$RUN_ID/record.json" "$TARGET_BASE_SHA" "$TARGET_REPO" "$FORGE_REVISION" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -383,6 +384,7 @@ record = json.load(open(sys.argv[1], encoding="utf-8"))
 assert record["run_mode"] == "target"
 assert record["target_name"] == "test-target"
 assert Path(record["target_repo"]).resolve() == Path(sys.argv[3]).resolve()
+assert record["delegation_artifact_revision"] == sys.argv[4]
 assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == sys.argv[2]
 assert record["base_sha"] == sys.argv[2]
