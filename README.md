@@ -416,7 +416,7 @@ AXIOM_FORGE_CHECK: PASS
 
 The health proof requires a clean Forge working tree and the CLIs for all standard adapters to be present on the host.
 
-`forge_check.sh` runs the adapter CLI preflight and nine test matrices that do not depend on the live external target checkout:
+`forge_check.sh` runs the adapter CLI preflight, the command-contract matrices that do not depend on the live external target checkout, and the operator evidence Python tests:
 
 ```bash
 bash scripts/check_adapters.sh
@@ -425,10 +425,17 @@ bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
 bash tests/target_verify/run_all.sh
 bash tests/target_operator_loop/run_all.sh
+python -m unittest tests.test_operator_evidence
 bash tests/compatibility/run_all.sh
 bash tests/adapter_evaluation/run_all.sh
 bash tests/qualification/run_all.sh
 bash tests/qualification_series/run_all.sh
+```
+
+The Delegation artifact set module also has a focused unit-test seam:
+
+```bash
+python -m unittest tests.test_delegation_artifact_set
 ```
 
 The standalone target preflight matrix is available separately:
