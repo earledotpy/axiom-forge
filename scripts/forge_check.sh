@@ -39,6 +39,10 @@ echo "== Target Operator Loop Matrix =="
 bash tests/target_operator_loop/run_all.sh
 
 echo
+echo "== Operator Evidence Summary Tests =="
+python -m unittest tests.test_operator_evidence
+
+echo
 echo "== Compatibility Matrix =="
 bash tests/compatibility/run_all.sh
 
