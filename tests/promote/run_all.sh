@@ -392,6 +392,50 @@ else
 fi
 cleanup_branch "$RUN_ID"
 
+RUN_ID="test-superseded-run"
+RUN_DIR="runs/$RUN_ID"
+cleanup_branch "$RUN_ID"
+mkdir -p "$RUN_DIR"
+cat > "$RUN_DIR/patch.diff" <<'PATCH'
+diff --git a/app/target.py b/app/target.py
+--- a/app/target.py
++++ b/app/target.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return "base"
++    return "superseded"
+PATCH
+PATCH_SHA="$(python scripts/sha256_file.py "$RUN_DIR/patch.diff")"
+cat > "$RUN_DIR/record.json" <<JSON
+{
+  "schema_version": 2,
+  "run_id": "$RUN_ID",
+  "agent": "test-agent",
+  "target_repo": ".",
+  "base_sha": "$(git rev-parse HEAD)",
+  "patch_file": "patch.diff",
+  "patch_sha256": "$PATCH_SHA",
+  "run_status": "COMPLETED",
+  "superseded_by_run_id": "test-superseding-run",
+  "superseded_reason": "newer_delegation_target_base"
+}
+JSON
+expect_pass "T5e_superseded_run_still_validates_as_evidence" \
+  bash scripts/validate_run_dir.sh "$RUN_DIR"
+expect_fail "T5f_superseded_run_fails_promotion" \
+  bash scripts/promote.sh "$RUN_DIR"
+if grep -q '"reason": "superseded_captured_run"' "$RUN_DIR/promotion.json"; then
+  pass "T5g_superseded_run_records_failure_reason"
+else
+  fail "T5g_superseded_run_records_failure_reason"
+fi
+if git show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
+  fail "T5h_superseded_run_creates_no_gate_branch"
+else
+  pass "T5h_superseded_run_creates_no_gate_branch"
+fi
+cleanup_branch "$RUN_ID"
+
 RUN_ID="test-patch-apply-failure"
 RUN_DIR="runs/$RUN_ID"
 cleanup_branch "$RUN_ID"

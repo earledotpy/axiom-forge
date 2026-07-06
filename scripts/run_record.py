@@ -52,6 +52,8 @@ def build_record(
     delegation_artifact_revision="",
     delegation_target_base_sha="",
     delegation_task_file="",
+    superseded_by_run_id="",
+    superseded_reason="",
 ):
     return {
         "schema_version": STRICT_SCHEMA_VERSION,
@@ -68,6 +70,8 @@ def build_record(
         "delegation_artifact_revision": clean(delegation_artifact_revision),
         "delegation_target_base_sha": clean(delegation_target_base_sha),
         "delegation_task_file": clean(delegation_task_file),
+        "superseded_by_run_id": clean(superseded_by_run_id),
+        "superseded_reason": clean(superseded_reason),
         "base_sha": base_sha,
         "task_file": clean(task_file),
         "patch_file": clean(patch_file),
@@ -182,6 +186,23 @@ def validate_completed_record(
     return {"run_id": run_id, "base_sha": base_sha}
 
 
+def supersession_reason(record):
+    superseded_by = record.get("superseded_by_run_id")
+    if superseded_by in (None, ""):
+        return None
+    if not is_safe_run_id(superseded_by):
+        raise RunRecordError("malformed_superseded_by_run_id")
+    reason = record.get("superseded_reason")
+    if not isinstance(reason, str) or reason == "":
+        raise RunRecordError("missing_superseded_reason")
+    if reason not in (
+        "newer_delegation_target_base",
+        "replacement_delegation_artifact_set",
+    ):
+        raise RunRecordError("malformed_superseded_reason")
+    return reason
+
+
 def _add_record_args(parser):
     parser.add_argument("--file", required=True)
     parser.add_argument("--run-id", required=True)
@@ -206,6 +227,8 @@ def _add_record_args(parser):
     parser.add_argument("--delegation-artifact-revision", default="")
     parser.add_argument("--delegation-target-base-sha", default="")
     parser.add_argument("--delegation-task-file", default="")
+    parser.add_argument("--superseded-by-run-id", default="")
+    parser.add_argument("--superseded-reason", default="")
 
 
 def main():
@@ -248,6 +271,8 @@ def main():
             delegation_artifact_revision=args.delegation_artifact_revision,
             delegation_target_base_sha=args.delegation_target_base_sha,
             delegation_task_file=args.delegation_task_file,
+            superseded_by_run_id=args.superseded_by_run_id,
+            superseded_reason=args.superseded_reason,
         )
         return 0
 

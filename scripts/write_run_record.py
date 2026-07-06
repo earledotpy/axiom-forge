@@ -27,6 +27,8 @@ parser.add_argument("--target-scope-sha256", default="")
 parser.add_argument("--delegation-artifact-revision", default="")
 parser.add_argument("--delegation-target-base-sha", default="")
 parser.add_argument("--delegation-task-file", default="")
+parser.add_argument("--superseded-by-run-id", default="")
+parser.add_argument("--superseded-reason", default="")
 args = parser.parse_args()
 
 write_record(
@@ -53,4 +55,6 @@ write_record(
     delegation_artifact_revision=args.delegation_artifact_revision,
     delegation_target_base_sha=args.delegation_target_base_sha,
     delegation_task_file=args.delegation_task_file,
+    superseded_by_run_id=args.superseded_by_run_id,
+    superseded_reason=args.superseded_reason,
 )

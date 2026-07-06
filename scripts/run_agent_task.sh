@@ -347,6 +347,13 @@ PATCH_SHA="$(python "$SCRIPT_DIR/sha256_file.py" "$RUN_DIR/patch.diff")" \
   || fail_run "patch_sha256_compute_failed"
 
 write_record "COMPLETED" ""
+if [[ "$RUN_MODE" == "target" ]]; then
+  python "$SCRIPT_DIR/run_history.py" mark-superseded \
+    --runs-root "$ROOT/runs" \
+    --current-record "$RUN_DIR/record.json" \
+    >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
+    || fail_run "run_history_update_failed"
+fi
 
 echo "RUN_CAPTURED: $RUN_ID"
 echo "RUN_DIR: runs/$RUN_ID"

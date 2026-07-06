@@ -123,6 +123,11 @@ fail_closed() {
   exit 1
 }
 
+PROMOTABLE_REASON="$(
+  python "$SCRIPT_DIR/run_history.py" check-promotable \
+    --record "$RECORD"
+)" || fail_closed "$PROMOTABLE_REASON"
+
 if [[ -n "$(git -C "$PROMOTION_REPO" status --porcelain)" ]]; then
   fail_closed "target_repo_dirty"
 fi

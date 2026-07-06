@@ -277,5 +277,45 @@ class RunRecordTests(unittest.TestCase):
 
         self.assertEqual(validated["base_sha"], "abc123")
 
+    def test_build_record_marks_current_runs_as_not_superseded(self):
+        record = run_record.build_record(
+            run_id="run-1",
+            agent="agent",
+            base_sha="abc123",
+            status="COMPLETED",
+        )
+
+        self.assertIsNone(record["superseded_by_run_id"])
+        self.assertIsNone(record["superseded_reason"])
+        self.assertIsNone(run_record.supersession_reason(record))
+
+    def test_superseded_record_is_distinguishable(self):
+        record = {
+            "run_id": "old-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "superseded_by_run_id": "new-run",
+            "superseded_reason": "newer_delegation_target_base",
+        }
+
+        self.assertEqual(
+            run_record.supersession_reason(record),
+            "newer_delegation_target_base",
+        )
+
+    def test_superseded_reason_validation_is_stable(self):
+        record = {
+            "run_id": "old-run",
+            "base_sha": "abc123",
+            "run_status": "COMPLETED",
+            "superseded_by_run_id": "new-run",
+            "superseded_reason": "manual_retry",
+        }
+
+        with self.assertRaises(run_record.RunRecordError) as caught:
+            run_record.supersession_reason(record)
+
+        self.assertEqual(caught.exception.reason, "malformed_superseded_reason")
+
 if __name__ == "__main__":
     unittest.main()
