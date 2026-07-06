@@ -348,6 +348,21 @@ expect_runner_fail \
   "R8k_target_mode_invalid_scope_sidecar_fails_closed" \
   "invalid_target_task_scope" \
   bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/invalid-scope-fixture.task.md
+
+expect_runner_fail \
+  "R8l_target_mode_missing_acceptance_check_fails_closed" \
+  "missing_target_acceptance_check" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/missing-acceptance-fixture.task.md
+
+expect_runner_fail \
+  "R8m_target_mode_empty_acceptance_check_fails_closed" \
+  "invalid_target_acceptance_check" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/empty-acceptance-fixture.task.md
+
+expect_runner_fail \
+  "R8n_target_mode_acceptance_check_in_scope_fails_closed" \
+  "target_acceptance_check_in_scope" \
+  bash scripts/run_agent_task.sh --target manual-simulated-agent tasks/acceptance-in-scope-fixture.task.md
 : > "$FORGE_DIRTY_SENTINEL"
 expect_runner_fail \
   "R8c_target_mode_dirty_forge_records_failed_evidence" \
@@ -438,6 +453,9 @@ assert record["target_base_sha"] == sys.argv[2]
 assert record["base_sha"] == sys.argv[2]
 assert record["target_scope_file"] == "allowed-paths.txt"
 assert record["target_scope_sha256"]
+import hashlib
+scope_hash = hashlib.sha256(Path(sys.argv[1]).with_name("allowed-paths.txt").read_bytes()).hexdigest()
+assert record["target_scope_sha256"] == scope_hash
 PY
 then
   pass "R8a_target_mode_records_target_identity"

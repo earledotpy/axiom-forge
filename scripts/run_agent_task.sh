@@ -99,72 +99,34 @@ write_record() {
 }
 
 
-target_scope_sidecar_path() {
-  local task_file="$1"
-  [[ "$task_file" == *.task.md ]] || return 1
-  printf '%s.allowed-paths.txt\n' "${task_file%.task.md}"
-}
 
-target_acceptance_check_path() {
-  local task_file="$1"
-  [[ "$task_file" == tasks/*.task.md ]] || return 1
-  printf '%s.accept.sh\n' "${task_file%.task.md}"
-}
-
-validate_target_acceptance_check() {
-  local acceptance_file="$1"
-  local content=""
-
-  if grep -Fxq "$acceptance_file" "$RUN_DIR/allowed-paths.txt"; then
-    fail_run "target_acceptance_check_in_scope"
-  fi
-
-  if ! content="$(git -C "$ROOT" show "$DELEGATION_ARTIFACT_REVISION:$acceptance_file" 2>/dev/null)"; then
-    fail_run "missing_target_acceptance_check"
-  fi
-
-  [[ -n "${content//[[:space:]]/}" ]] || fail_run "invalid_target_acceptance_check"
-}
-
-validate_and_copy_target_scope() {
-  local sidecar="$1"
-  local reason=""
+prepare_target_run_artifacts() {
+  local artifact_json=""
   local status=0
 
-  if [[ ! -e "$sidecar" ]]; then
-    fail_run "missing_target_task_scope"
-  fi
-
   set +e
-  reason="$(python - "$sidecar" <<'PY'
-from pathlib import Path
-import sys
-from scripts import target_task_scope
-
-try:
-    target_task_scope.load_scope_sidecar(Path(sys.argv[1]))
-except target_task_scope.TargetTaskScopeError as exc:
-    print(exc.reason)
-    raise SystemExit(1)
-PY
-)"
+  artifact_json="$(python "$SCRIPT_DIR/delegation_artifact_set.py" prepare-target-run \
+    --task-file "$TASK_FILE" \
+    --run-dir "$RUN_DIR" \
+    --forge-root "$ROOT" \
+    --delegation-artifact-revision "$DELEGATION_ARTIFACT_REVISION")"
   status=$?
   set -e
 
   if [[ "$status" -ne 0 ]]; then
-    case "$reason" in
-      target_scope_sidecar_missing) fail_run "missing_target_task_scope" ;;
-      target_scope_empty) fail_run "empty_target_task_scope" ;;
-      *) fail_run "invalid_target_task_scope" ;;
-    esac
+    fail_run "${artifact_json:-invalid_delegation_artifact_set}"
   fi
 
-  cp "$sidecar" "$RUN_DIR/allowed-paths.txt" || fail_run "target_task_scope_copy_failed"
-  [[ -s "$RUN_DIR/allowed-paths.txt" ]] || fail_run "empty_target_task_scope"
-  TARGET_SCOPE_FILE="allowed-paths.txt"
-  TARGET_SCOPE_SHA256="$(python "$SCRIPT_DIR/sha256_file.py" "$RUN_DIR/allowed-paths.txt")" \
-    || fail_run "target_task_scope_sha256_compute_failed"
+  TARGET_SCOPE_FILE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["target_scope_file"])' "$artifact_json")" \
+    || fail_run "invalid_delegation_artifact_set"
+  TARGET_SCOPE_SHA256="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["target_scope_sha256"])' "$artifact_json")" \
+    || fail_run "invalid_delegation_artifact_set"
+  DELEGATION_ARTIFACT_REVISION="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["delegation_artifact_revision"])' "$artifact_json")" \
+    || fail_run "invalid_delegation_artifact_set"
+  DELEGATION_TASK_FILE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["delegation_task_file"])' "$artifact_json")" \
+    || fail_run "invalid_delegation_artifact_set"
 }
+
 read_adapter_failure_reason() {
   [[ -e "$ADAPTER_FAILURE_FILE" ]] || return 1
 
@@ -213,14 +175,7 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
 
   DELEGATION_ARTIFACT_REVISION="$(git -C "$ROOT" rev-parse HEAD)" \
     || fail_run "delegation_artifact_revision_unresolved"
-  DELEGATION_TASK_FILE="$TASK_FILE"
-
-  TARGET_SCOPE_SOURCE="$(target_scope_sidecar_path "$TASK_FILE")" \
-    || fail_run "invalid_target_task_scope"
-  validate_and_copy_target_scope "$TARGET_SCOPE_SOURCE"
-  TARGET_ACCEPTANCE_SOURCE="$(target_acceptance_check_path "$TASK_FILE")" \
-    || fail_run "invalid_target_acceptance_check"
-  validate_target_acceptance_check "$TARGET_ACCEPTANCE_SOURCE"
+  prepare_target_run_artifacts
 
   if python "$SCRIPT_DIR/target_preflight.py" \
     --config "$ROOT/gate.toml" \

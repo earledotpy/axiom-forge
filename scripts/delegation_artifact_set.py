@@ -1,5 +1,9 @@
 from dataclasses import dataclass
+import argparse
+import json
 from pathlib import Path
+import shutil
+import subprocess
 
 try:
     from target_task_scope import TargetTaskScopeError, load_scope_sidecar
@@ -56,20 +60,21 @@ def load_task_artifact_set(task_file: Path) -> DelegationArtifactSet:
             state="draft",
             reason="missing_delegation_scope_file",
         )
-    if not acceptance_file.exists():
-        return DelegationArtifactSet(
-            task_file=task_file.as_posix(),
-            scope_file=scope_file.as_posix(),
-            acceptance_file=acceptance_file.as_posix(),
-            approved_paths=frozenset(),
-            state="draft",
-            reason="missing_delegation_acceptance_check",
-        )
 
     try:
         approved_paths = load_scope_sidecar(scope_file)
     except TargetTaskScopeError as exc:
         raise DelegationArtifactSetError(exc.reason) from exc
+
+    if not acceptance_file.exists():
+        return DelegationArtifactSet(
+            task_file=task_file.as_posix(),
+            scope_file=scope_file.as_posix(),
+            acceptance_file=acceptance_file.as_posix(),
+            approved_paths=approved_paths,
+            state="draft",
+            reason="missing_delegation_acceptance_check",
+        )
 
     if not acceptance_file.read_text(encoding="utf-8").strip():
         return DelegationArtifactSet(
@@ -95,3 +100,138 @@ def load_delegation_ready_artifact_set(task_file: Path) -> DelegationArtifactSet
     if artifact_set.state == "delegation-ready":
         return artifact_set
     return None
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _repo_relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise DelegationArtifactSetError("invalid_delegation_task_file") from exc
+
+
+def _committed_file_content(root: Path, revision: str, repo_path: str, missing_reason: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "show", f"{revision}:{repo_path}"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise DelegationArtifactSetError(missing_reason)
+    return result.stdout
+
+
+def prepare_target_run_artifacts(
+    *,
+    task_file: Path,
+    run_dir: Path,
+    forge_root: Path,
+    delegation_artifact_revision: str,
+) -> dict[str, str]:
+    forge_root = Path(forge_root).resolve()
+    task_file = Path(task_file)
+    if not task_file.is_absolute():
+        task_file = forge_root / task_file
+    task_file = task_file.resolve()
+    run_dir = Path(run_dir)
+
+    try:
+        artifact_set = load_task_artifact_set(task_file)
+    except DelegationArtifactSetError as exc:
+        if exc.reason in {"target_scope_sidecar_missing", "missing_delegation_scope_file"}:
+            raise DelegationArtifactSetError("missing_target_task_scope") from exc
+        if exc.reason == "target_scope_empty":
+            raise DelegationArtifactSetError("empty_target_task_scope") from exc
+        if exc.reason.startswith("target_scope_"):
+            raise DelegationArtifactSetError("invalid_target_task_scope") from exc
+        raise
+
+    if artifact_set.state != "delegation-ready":
+        if artifact_set.reason == "missing_delegation_scope_file":
+            raise DelegationArtifactSetError("missing_target_task_scope")
+        if artifact_set.reason == "missing_delegation_acceptance_check":
+            raise DelegationArtifactSetError("missing_target_acceptance_check")
+        if artifact_set.reason == "empty_delegation_acceptance_check":
+            raise DelegationArtifactSetError("invalid_target_acceptance_check")
+        raise DelegationArtifactSetError(artifact_set.reason or "invalid_delegation_artifact_set")
+
+    acceptance_file = Path(artifact_set.acceptance_file)
+    acceptance_repo_path = _repo_relative(acceptance_file.resolve(), forge_root)
+    if acceptance_repo_path in artifact_set.approved_paths:
+        raise DelegationArtifactSetError("target_acceptance_check_in_scope")
+
+    content = _committed_file_content(
+        forge_root,
+        delegation_artifact_revision,
+        acceptance_repo_path,
+        "missing_target_acceptance_check",
+    )
+    if not content.strip():
+        raise DelegationArtifactSetError("invalid_target_acceptance_check")
+
+    copied_scope = run_dir / "allowed-paths.txt"
+    try:
+        shutil.copyfile(artifact_set.scope_file, copied_scope)
+    except OSError as exc:
+        raise DelegationArtifactSetError("target_task_scope_copy_failed") from exc
+    if not copied_scope.exists() or copied_scope.stat().st_size == 0:
+        raise DelegationArtifactSetError("empty_target_task_scope")
+
+    try:
+        target_scope_sha256 = _sha256_file(copied_scope)
+    except OSError as exc:
+        raise DelegationArtifactSetError("target_task_scope_sha256_compute_failed") from exc
+
+    return {
+        "target_scope_file": "allowed-paths.txt",
+        "target_scope_sha256": target_scope_sha256,
+        "delegation_artifact_revision": delegation_artifact_revision,
+        "delegation_task_file": _repo_relative(task_file, forge_root),
+    }
+
+
+def _cmd_prepare_target_run(args: argparse.Namespace) -> int:
+    try:
+        result = prepare_target_run_artifacts(
+            task_file=Path(args.task_file),
+            run_dir=Path(args.run_dir),
+            forge_root=Path(args.forge_root),
+            delegation_artifact_revision=args.delegation_artifact_revision,
+        )
+    except DelegationArtifactSetError as exc:
+        print(exc.reason)
+        return 1
+
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    prepare_parser = subparsers.add_parser("prepare-target-run")
+    prepare_parser.add_argument("--task-file", required=True)
+    prepare_parser.add_argument("--run-dir", required=True)
+    prepare_parser.add_argument("--forge-root", required=True)
+    prepare_parser.add_argument("--delegation-artifact-revision", required=True)
+    prepare_parser.set_defaults(func=_cmd_prepare_target_run)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
