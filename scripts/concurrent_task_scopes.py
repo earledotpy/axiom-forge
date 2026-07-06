@@ -2,9 +2,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from target_task_scope import TargetTaskScopeError, load_scope_sidecar
+    from delegation_artifact_set import (
+        DelegationArtifactSetError,
+        acceptance_check_path as artifact_acceptance_check_path,
+        load_delegation_ready_artifact_set,
+        scope_sidecar_path as artifact_scope_sidecar_path,
+    )
 except ModuleNotFoundError:
-    from scripts.target_task_scope import TargetTaskScopeError, load_scope_sidecar
+    from scripts.delegation_artifact_set import (
+        DelegationArtifactSetError,
+        acceptance_check_path as artifact_acceptance_check_path,
+        load_delegation_ready_artifact_set,
+        scope_sidecar_path as artifact_scope_sidecar_path,
+    )
 
 
 class ConcurrentTaskScopeError(Exception):
@@ -30,40 +40,33 @@ class ConcurrentTaskScopeConflict:
 
 
 def scope_sidecar_path(task_file: Path) -> Path:
-    if task_file.name.endswith(".task.md"):
-        return task_file.with_name(f"{task_file.name[:-len('.task.md')]}.allowed-paths.txt")
-    raise ConcurrentTaskScopeError("invalid_delegation_task_file")
+    try:
+        return artifact_scope_sidecar_path(task_file)
+    except DelegationArtifactSetError as exc:
+        raise ConcurrentTaskScopeError(exc.reason) from exc
 
 
 def acceptance_check_path(task_file: Path) -> Path:
-    if task_file.name.endswith(".task.md"):
-        return task_file.with_name(f"{task_file.name[:-len('.task.md')]}.accept.sh")
-    raise ConcurrentTaskScopeError("invalid_delegation_task_file")
+    try:
+        return artifact_acceptance_check_path(task_file)
+    except DelegationArtifactSetError as exc:
+        raise ConcurrentTaskScopeError(exc.reason) from exc
 
 
 def load_delegation_ready_task(task_file: Path) -> DelegationTaskScope | None:
-    if not task_file.exists():
-        raise ConcurrentTaskScopeError("missing_delegation_task_file")
-
-    scope_file = scope_sidecar_path(task_file)
-    acceptance_file = acceptance_check_path(task_file)
-
-    if not scope_file.exists() or not acceptance_file.exists():
-        return None
-
     try:
-        approved_paths = load_scope_sidecar(scope_file)
-    except TargetTaskScopeError as exc:
+        artifact_set = load_delegation_ready_artifact_set(task_file)
+    except DelegationArtifactSetError as exc:
         raise ConcurrentTaskScopeError(exc.reason) from exc
 
-    if not acceptance_file.read_text(encoding="utf-8").strip():
+    if artifact_set is None:
         return None
 
     return DelegationTaskScope(
-        task_file=task_file.as_posix(),
-        scope_file=scope_file.as_posix(),
-        acceptance_file=acceptance_file.as_posix(),
-        approved_paths=approved_paths,
+        task_file=artifact_set.task_file,
+        scope_file=artifact_set.scope_file,
+        acceptance_file=artifact_set.acceptance_file,
+        approved_paths=artifact_set.approved_paths,
     )
 
 

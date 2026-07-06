@@ -7,15 +7,15 @@ try:
     from concurrent_task_scopes import (
         ConcurrentTaskScopeError,
         check_concurrent_task_scopes,
-        load_delegation_ready_task,
     )
+    from delegation_artifact_set import load_task_artifact_set
     from promotion_review import PromotionReviewError, validate_review
 except ModuleNotFoundError:
     from scripts.concurrent_task_scopes import (
         ConcurrentTaskScopeError,
         check_concurrent_task_scopes,
-        load_delegation_ready_task,
     )
+    from scripts.delegation_artifact_set import load_task_artifact_set
     from scripts.promotion_review import PromotionReviewError, validate_review
 
 
@@ -194,17 +194,17 @@ def summarize_runs(runs_root: Path, forge_root: Path | None = None) -> dict:
 
 def summarize_task(task_file: Path) -> dict:
     task_file = Path(task_file)
-    task = load_delegation_ready_task(task_file)
-    state = "delegation-ready" if task is not None else "draft"
+    task = load_task_artifact_set(task_file)
+    is_ready = task.state == "delegation-ready"
     return {
         "schema_version": SCHEMA_VERSION,
         "source": "task",
-        "state": state,
+        "state": task.state,
         "task": {
             "task_file": task_file.as_posix(),
-            "approved_scope_file": task.scope_file if task is not None else None,
-            "acceptance_file": task.acceptance_file if task is not None else None,
-            "approved_paths": sorted(task.approved_paths) if task is not None else [],
+            "approved_scope_file": task.scope_file if is_ready else None,
+            "acceptance_file": task.acceptance_file if is_ready else None,
+            "approved_paths": sorted(task.approved_paths) if is_ready else [],
         },
         "scope": {"conflict": False, "reason": None, "conflicts": []},
     }
