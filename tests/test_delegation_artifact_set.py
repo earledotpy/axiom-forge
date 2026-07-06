@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -134,6 +135,98 @@ class DelegationArtifactSetTests(unittest.TestCase):
                 run_dir=self.root,
                 forge_root=self.root,
                 delegation_artifact_revision="HEAD",
+            )
+
+        self.assertEqual(caught.exception.reason, "target_acceptance_check_in_scope")
+
+    def init_repo(self) -> str:
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "user.name", "Axiom Test"], check=True)
+        subprocess.run(["git", "-C", str(self.root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", "artifact set"], check=True)
+        return subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+
+    def write_committed_task(self, name: str, scope: str, acceptance: str | None) -> tuple[Path, str]:
+        tasks = self.root / "tasks"
+        tasks.mkdir()
+        task = tasks / f"{name}.task.md"
+        task.write_text(f"# {name}\n", encoding="utf-8")
+        (tasks / f"{name}.allowed-paths.txt").write_text(scope, encoding="utf-8")
+        if acceptance is not None:
+            (tasks / f"{name}.accept.sh").write_bytes(acceptance.encode("utf-8"))
+        return task, self.init_repo()
+
+    def test_committed_acceptance_artifact_uses_recorded_revision(self):
+        task, revision = self.write_committed_task("ready", "app/target.py\n", "echo committed\n")
+        (self.root / "tasks" / "ready.accept.sh").write_text("echo mutable\n", encoding="utf-8")
+        scope_file = self.root / "run-scope.txt"
+        scope_file.write_text("app/target.py\n", encoding="utf-8")
+
+        artifact = delegation_artifact_set.committed_acceptance_artifact_from_record(
+            forge_root=self.root,
+            record={
+                "delegation_artifact_revision": revision,
+                "delegation_task_file": "tasks/ready.task.md",
+            },
+            scope_file=scope_file,
+        )
+
+        self.assertEqual(artifact["path"], "tasks/ready.accept.sh")
+        self.assertEqual(artifact["revision"], revision)
+        self.assertEqual(artifact["content"], "echo committed\n")
+        self.assertEqual(artifact["sha256"], hashlib.sha256(b"echo committed\n").hexdigest())
+        self.assertEqual(task.as_posix(), (self.root / "tasks" / "ready.task.md").as_posix())
+
+    def test_committed_acceptance_artifact_rejects_missing_check(self):
+        self.write_committed_task("missing", "app/target.py\n", acceptance=None)
+        revision = subprocess.check_output(["git", "-C", str(self.root), "rev-parse", "HEAD"], text=True).strip()
+        scope_file = self.root / "run-scope.txt"
+        scope_file.write_text("app/target.py\n", encoding="utf-8")
+
+        with self.assertRaises(delegation_artifact_set.DelegationArtifactSetError) as caught:
+            delegation_artifact_set.committed_acceptance_artifact_from_record(
+                forge_root=self.root,
+                record={
+                    "delegation_artifact_revision": revision,
+                    "delegation_task_file": "tasks/missing.task.md",
+                },
+                scope_file=scope_file,
+            )
+
+        self.assertEqual(caught.exception.reason, "missing_target_acceptance_check")
+
+    def test_committed_acceptance_artifact_rejects_invalid_check_content(self):
+        _, revision = self.write_committed_task("invalid", "app/target.py\n", "echo invalid\x00\n")
+        scope_file = self.root / "run-scope.txt"
+        scope_file.write_text("app/target.py\n", encoding="utf-8")
+
+        with self.assertRaises(delegation_artifact_set.DelegationArtifactSetError) as caught:
+            delegation_artifact_set.committed_acceptance_artifact_from_record(
+                forge_root=self.root,
+                record={
+                    "delegation_artifact_revision": revision,
+                    "delegation_task_file": "tasks/invalid.task.md",
+                },
+                scope_file=scope_file,
+            )
+
+        self.assertEqual(caught.exception.reason, "invalid_target_acceptance_check")
+
+    def test_committed_acceptance_artifact_rejects_acceptance_inside_copied_scope(self):
+        _, revision = self.write_committed_task("ready", "app/target.py\n", "echo ok\n")
+        (self.root / "tasks" / "ready.allowed-paths.txt").write_text("app/target.py\n", encoding="utf-8")
+        scope_file = self.root / "run-scope.txt"
+        scope_file.write_text("tasks/ready.accept.sh\n", encoding="utf-8")
+
+        with self.assertRaises(delegation_artifact_set.DelegationArtifactSetError) as caught:
+            delegation_artifact_set.committed_acceptance_artifact_from_record(
+                forge_root=self.root,
+                record={
+                    "delegation_artifact_revision": revision,
+                    "delegation_task_file": "tasks/ready.task.md",
+                },
+                scope_file=scope_file,
             )
 
         self.assertEqual(caught.exception.reason, "target_acceptance_check_in_scope")

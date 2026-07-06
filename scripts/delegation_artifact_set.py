@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 import argparse
+import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 
@@ -119,6 +120,23 @@ def _repo_relative(path: Path, root: Path) -> str:
         raise DelegationArtifactSetError("invalid_delegation_task_file") from exc
 
 
+def validate_delegation_task_file(path: str) -> PurePosixPath:
+    if "\\" in path:
+        raise DelegationArtifactSetError("malformed_delegation_task_file")
+    pure = PurePosixPath(path)
+    parts = pure.parts
+    if pure.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
+        raise DelegationArtifactSetError("malformed_delegation_task_file")
+    if not path.startswith("tasks/") or not path.endswith(".task.md"):
+        raise DelegationArtifactSetError("malformed_delegation_task_file")
+    return pure
+
+
+def acceptance_repo_path_for_task(task_file: str) -> str:
+    task_path = validate_delegation_task_file(task_file)
+    name = str(task_path)
+    return f"{name[:-len('.task.md')]}.accept.sh"
+
 def _committed_file_content(root: Path, revision: str, repo_path: str, missing_reason: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), "show", f"{revision}:{repo_path}"],
@@ -132,6 +150,58 @@ def _committed_file_content(root: Path, revision: str, repo_path: str, missing_r
         raise DelegationArtifactSetError(missing_reason)
     return result.stdout
 
+
+def committed_acceptance_artifact(
+    *,
+    forge_root: Path,
+    delegation_artifact_revision: str,
+    delegation_task_file: str,
+    scope_file: Path,
+) -> dict[str, str]:
+    try:
+        allowed_paths = load_scope_sidecar(Path(scope_file))
+    except TargetTaskScopeError as exc:
+        raise DelegationArtifactSetError(exc.reason) from exc
+
+    acceptance_path = acceptance_repo_path_for_task(delegation_task_file)
+    if acceptance_path in allowed_paths:
+        raise DelegationArtifactSetError("target_acceptance_check_in_scope")
+
+    content = _committed_file_content(
+        Path(forge_root),
+        delegation_artifact_revision,
+        acceptance_path,
+        "missing_target_acceptance_check",
+    )
+    if not content.strip() or "\x00" in content or "\r" in content:
+        raise DelegationArtifactSetError("invalid_target_acceptance_check")
+
+    return {
+        "path": acceptance_path,
+        "revision": delegation_artifact_revision,
+        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "content": content,
+    }
+
+
+def committed_acceptance_artifact_from_record(
+    *,
+    forge_root: Path,
+    record: dict,
+    scope_file: Path,
+) -> dict[str, str]:
+    revision = record.get("delegation_artifact_revision")
+    if not isinstance(revision, str) or not revision:
+        raise DelegationArtifactSetError("missing_delegation_artifact_revision")
+    task_file = record.get("delegation_task_file")
+    if not isinstance(task_file, str) or not task_file:
+        raise DelegationArtifactSetError("missing_delegation_task_file")
+    return committed_acceptance_artifact(
+        forge_root=forge_root,
+        delegation_artifact_revision=revision,
+        delegation_task_file=task_file,
+        scope_file=scope_file,
+    )
 
 def prepare_target_run_artifacts(
     *,

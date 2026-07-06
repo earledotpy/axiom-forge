@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 import subprocess
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
+from delegation_artifact_set import (
+    DelegationArtifactSetError,
+    committed_acceptance_artifact_from_record,
+    validate_delegation_task_file as validate_delegation_task_path,
+)
 from target_preflight import PreflightFailure, is_inside, load_primary_target, normalize_path
-from target_task_scope import TargetTaskScopeError, load_scope_sidecar
-
 
 class TargetVerifyFailure(Exception):
     def __init__(self, reason: str):
@@ -45,34 +47,11 @@ def configured_target_path(config_path: Path, target: dict) -> Path:
     return path.resolve()
 
 
-def validate_delegation_task_file(path: str) -> PurePosixPath:
-    if "\\" in path:
-        raise TargetVerifyFailure("malformed_delegation_task_file")
-    pure = PurePosixPath(path)
-    parts = pure.parts
-    if pure.is_absolute() or not parts or any(part in ("", ".", "..") for part in parts):
-        raise TargetVerifyFailure("malformed_delegation_task_file")
-    if not path.startswith("tasks/") or not path.endswith(".task.md"):
-        raise TargetVerifyFailure("malformed_delegation_task_file")
-    return pure
-
-
-def acceptance_path_for_task(task_file: str) -> str:
-    task_path = validate_delegation_task_file(task_file)
-    name = str(task_path)
-    return f"{name[:-len('.task.md')]}.accept.sh"
-
-
-def git_show_text(forge_root: Path, revision: str, repo_path: str, missing_reason: str) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(forge_root), "show", f"{revision}:{repo_path}"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise TargetVerifyFailure(missing_reason)
-    return completed.stdout
+def validate_delegation_task_file(path: str) -> None:
+    try:
+        validate_delegation_task_path(path)
+    except DelegationArtifactSetError as exc:
+        raise TargetVerifyFailure(exc.reason) from exc
 
 
 def validate_acceptance_artifact(
@@ -81,38 +60,14 @@ def validate_acceptance_artifact(
     record: dict,
     scope_file: Path,
 ) -> dict:
-    revision = require_string(
-        record,
-        "delegation_artifact_revision",
-        "missing_delegation_artifact_revision",
-    )
-    task_file = require_string(record, "delegation_task_file", "missing_delegation_task_file")
-    acceptance_path = acceptance_path_for_task(task_file)
-
     try:
-        allowed_paths = load_scope_sidecar(scope_file)
-    except TargetTaskScopeError as exc:
-        raise TargetVerifyFailure(exc.reason)
-    if acceptance_path in allowed_paths:
-        raise TargetVerifyFailure("target_acceptance_check_in_scope")
-
-    content = git_show_text(
-        forge_root,
-        revision,
-        acceptance_path,
-        "missing_target_acceptance_check",
-    )
-    if not content.strip():
-        raise TargetVerifyFailure("invalid_target_acceptance_check")
-    if "\x00" in content or "\r" in content:
-        raise TargetVerifyFailure("invalid_target_acceptance_check")
-
-    return {
-        "path": acceptance_path,
-        "revision": revision,
-        "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-        "content": content,
-    }
+        return committed_acceptance_artifact_from_record(
+            forge_root=forge_root,
+            record=record,
+            scope_file=scope_file,
+        )
+    except DelegationArtifactSetError as exc:
+        raise TargetVerifyFailure(exc.reason) from exc
 
 
 def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> dict:
