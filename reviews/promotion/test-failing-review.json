@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "review_type": "promotion",
+  "run_id": "test-failing-review",
+  "patch_sha256": "b2e0abf7825cba41d3f3fc43dd99808d621338da5aa381cf2b80418563dab3e4",
+  "reviewer": "promotion-review-test",
+  "decision": "CHANGES_REQUESTED",
+  "concerns": "Needs changes before promotion.",
+  "follow_up_tasks": []
+}

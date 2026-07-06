@@ -244,6 +244,7 @@ assert Path(promotion["target_repo"]).resolve() == target_repo
 assert promotion["delegation_target_base_sha"]
 assert promotion["branch"].startswith("gate/")
 assert promotion["promotion_commit"]
+assert promotion["promotion_review_revision"]
 PY
   then
     pass "L12_promotion_record_remains_forge_owned"

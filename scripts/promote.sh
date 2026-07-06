@@ -83,6 +83,7 @@ fi
 GATE_WT=""
 BRANCH_CREATED=0
 PROMOTION_COMMIT=""
+PROMOTION_REVIEW_REVISION=""
 
 record_status() {
   local status="$1"
@@ -100,6 +101,7 @@ record_status() {
     --target-base-branch "$TARGET_BASE_BRANCH" \
     --delegation-target-base-sha "$DELEGATION_TARGET_BASE_SHA" \
     --target-remote-url "$TARGET_REMOTE_URL" \
+    --promotion-review-revision "$PROMOTION_REVIEW_REVISION" \
     >/dev/null 2>&1 || true
 }
 
@@ -145,6 +147,14 @@ if git -C "$PROMOTION_REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
 fi
 
 bash "$SCRIPT_DIR/verify_patch.sh" "${VERIFY_FLAG[@]}" "$RUN_DIR" || fail_closed "pre_promotion_verification_failed"
+
+PROMOTION_REVIEW_CONTEXT="$(
+  python "$SCRIPT_DIR/promotion_review.py" validate \
+    --forge-root "$ROOT" \
+    --run-dir "$RUN_DIR"
+)" || fail_closed "$PROMOTION_REVIEW_CONTEXT"
+PROMOTION_REVIEW_REVISION="$(printf '%s\n' "$PROMOTION_REVIEW_CONTEXT" | sed -n 's/^promotion_review_revision=//p')"
+[[ -n "$PROMOTION_REVIEW_REVISION" ]] || fail_closed "unresolved_promotion_review_revision"
 
 bash "$SCRIPT_DIR/require_operator_approval.sh" "$RUN_ID" || fail_closed "operator_approval_failed"
 

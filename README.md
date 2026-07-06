@@ -203,6 +203,10 @@ tasks/
   *.task.md                         # operator-authored tasks for real agent runs
   *.allowed-paths.txt               # target-mode sidecars listing exact allowed target paths
 
+reviews/promotion/
+  <run-id>.json                     # committed run-specific promotion review result
+  patch-<patch-sha256>.json         # committed patch-specific promotion review result
+
 tests/
   gate_contract/run_all.sh          # static gate-contract matrix
   promote/run_all.sh                # Forge-local and target-mode promotion matrix
@@ -337,11 +341,11 @@ Target-mode promotion requires the explicit target flag:
 bash scripts/promote.sh --target "runs/<run-id>"
 ```
 
-Promotion validates the run directory, rejects stale base SHAs, verifies the patch before promotion, requires the operator to type the exact run ID, creates `gate/<run-id>`, applies and commits the patch there, reruns verification, and writes `promotion.json`.
+Promotion validates the run directory, rejects stale base SHAs, verifies the patch before promotion, requires a committed promotion review result, requires the operator to type the exact run ID, creates `gate/<run-id>`, applies and commits the patch there, reruns verification, and writes `promotion.json`.
 
 In Forge-local mode, `gate/<run-id>` is created in the Forge repository. In target mode, `gate/<run-id>` is created in the configured external target repository while `promotion.json` remains under Forge's `runs/<run-id>/` evidence directory.
 
-Promotion fails closed if any required condition is missing, including a dirty promotion repository, stale base SHA, existing gate branch, failed pre-promotion verification, failed operator approval, patch application failure, failed post-promotion verification, or target identity mismatch.
+Promotion fails closed if any required condition is missing, including a dirty promotion repository, stale base SHA, existing gate branch, failed pre-promotion verification, missing or non-approving promotion review evidence, failed operator approval, patch application failure, failed post-promotion verification, or target identity mismatch.
 
 ## Operator Workflow Examples
 
@@ -376,7 +380,7 @@ bash scripts/verify_patch.sh --target "runs/$RUN_ID"
 printf "%s\n" "$RUN_ID" | bash scripts/promote.sh --target "runs/$RUN_ID"
 ```
 
-Before target promotion, review remains operator-driven: inspect `record.json`, `patch.diff`, `verify.json`, and the target diff. Formal review records are deferred for the first milestone.
+Before promotion, review must be captured as committed structured evidence under `reviews/promotion/`. A review may target one run with `reviews/promotion/<run-id>.json` or a deterministic patch with `reviews/promotion/patch-<patch-sha256>.json`. The result records reviewer identity, decision, concerns or `NO_CONCERNS`, and follow-up bounded patch tasks when review requests work outside the current scope. `promotion.json` records the Forge commit SHA that last changed the review result used for promotion.
 
 ## Health Check
 

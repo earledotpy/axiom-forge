@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "review_type": "promotion",
+  "run_id": "test-operator-mismatch",
+  "patch_sha256": "b2e0abf7825cba41d3f3fc43dd99808d621338da5aa381cf2b80418563dab3e4",
+  "reviewer": "promotion-review-test",
+  "decision": "APPROVED",
+  "concerns": "NO_CONCERNS",
+  "follow_up_tasks": []
+}

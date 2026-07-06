@@ -456,6 +456,51 @@ make_good_run "$RUN_ID"
 expect_fail "T8_operator_mismatch_fails" \
   bash -c "printf 'wrong-id\n' | bash scripts/promote.sh 'runs/$RUN_ID'"
 
+RUN_ID="test-missing-review"
+cleanup_branch "$RUN_ID"
+make_good_run "$RUN_ID"
+expect_fail "T8a_missing_promotion_review_fails" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh 'runs/$RUN_ID'"
+if grep -q '"reason": "missing_promotion_review_result"' "runs/$RUN_ID/promotion.json"; then
+  pass "T8b_missing_promotion_review_records_failure_reason"
+else
+  fail "T8b_missing_promotion_review_records_failure_reason"
+fi
+
+RUN_ID="test-malformed-review"
+cleanup_branch "$RUN_ID"
+make_good_run "$RUN_ID"
+expect_fail "T8c_malformed_promotion_review_fails" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh 'runs/$RUN_ID'"
+if grep -q '"reason": "malformed_promotion_review_result"' "runs/$RUN_ID/promotion.json"; then
+  pass "T8d_malformed_promotion_review_records_failure_reason"
+else
+  fail "T8d_malformed_promotion_review_records_failure_reason"
+fi
+
+RUN_ID="test-failing-review"
+cleanup_branch "$RUN_ID"
+make_good_run "$RUN_ID"
+expect_fail "T8e_failing_promotion_review_fails" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh 'runs/$RUN_ID'"
+if grep -q '"reason": "failing_promotion_review_result"' "runs/$RUN_ID/promotion.json"; then
+  pass "T8f_failing_promotion_review_records_failure_reason"
+else
+  fail "T8f_failing_promotion_review_records_failure_reason"
+fi
+
+RUN_ID="test-unresolved-review-followups"
+cleanup_branch "$RUN_ID"
+make_good_run "$RUN_ID"
+expect_fail "T8g_unresolved_promotion_review_followups_fail" \
+  bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh 'runs/$RUN_ID'"
+if grep -q '"reason": "unresolved_promotion_review_followups"' "runs/$RUN_ID/promotion.json"; then
+  pass "T8h_unresolved_promotion_review_followups_record_failure_reason"
+else
+  fail "T8h_unresolved_promotion_review_followups_record_failure_reason"
+fi
+
+
 RUN_ID="test-existing-branch"
 cleanup_branch "$RUN_ID"
 make_good_run "$RUN_ID"
@@ -483,6 +528,12 @@ if grep -q '"status": "PROMOTED"' "runs/$RUN_ID/promotion.json"; then
   pass "T11_success_records_promotion_json"
 else
   fail "T11_success_records_promotion_json"
+fi
+
+if grep -q '"promotion_review_revision":' "runs/$RUN_ID/promotion.json"; then
+  pass "T11a_success_records_promotion_review_revision"
+else
+  fail "T11a_success_records_promotion_review_revision"
 fi
 
 cleanup_branch "$RUN_ID"
@@ -591,6 +642,7 @@ assert record["delegation_target_base_sha"]
 assert record["target_remote_url"] == "https://example.test/target.git"
 assert record["branch"] == "gate/target-success"
 assert record["promotion_commit"]
+assert record["promotion_review_revision"]
 PY
 then
   pass "T17d_target_success_records_target_promotion_json"

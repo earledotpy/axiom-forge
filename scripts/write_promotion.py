@@ -22,6 +22,7 @@ parser.add_argument("--target-name", default="")
 parser.add_argument("--target-base-branch", default="")
 parser.add_argument("--delegation-target-base-sha", default="")
 parser.add_argument("--target-remote-url", default="")
+parser.add_argument("--promotion-review-revision", default="")
 args = parser.parse_args()
 
 out = {
@@ -37,6 +38,7 @@ out = {
     "target_base_branch": clean(args.target_base_branch),
     "delegation_target_base_sha": clean(args.delegation_target_base_sha),
     "target_remote_url": clean(args.target_remote_url),
+    "promotion_review_revision": clean(args.promotion_review_revision),
     "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
 }
 
