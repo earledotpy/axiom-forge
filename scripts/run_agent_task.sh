@@ -41,6 +41,7 @@ BASE_SHA=""
 AGENT_WT="$ROOT/../agent-$RUN_ID"
 PATCH_SHA=""
 CLI_PROVENANCE_FILE="$RUN_DIR/cli-provenance.json"
+ADAPTER_FAILURE_FILE="$RUN_DIR/adapter-failure.json"
 CLI_COMMAND=""
 CLI_PATH=""
 CLI_VERSION=""
@@ -164,6 +165,21 @@ PY
   TARGET_SCOPE_SHA256="$(python "$SCRIPT_DIR/sha256_file.py" "$RUN_DIR/allowed-paths.txt")" \
     || fail_run "target_task_scope_sha256_compute_failed"
 }
+read_adapter_failure_reason() {
+  [[ -e "$ADAPTER_FAILURE_FILE" ]] || return 1
+
+  local reason=""
+  reason="$(python "$SCRIPT_DIR/json_get.py" "$ADAPTER_FAILURE_FILE" failure_reason)" || return 2
+  case "$reason" in
+    adapter_cli_unavailable|adapter_quota_exhausted|adapter_unavailable)
+      printf '%s\n' "$reason"
+      return 0
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+}
 read_cli_provenance() {
   [[ -e "$CLI_PROVENANCE_FILE" ]] || return 0
 
@@ -274,7 +290,7 @@ TARGET_STATUS_BEFORE="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracke
   || fail_run "target_repo_status_snapshot_failed"
 
 ADAPTER_EXIT=0
-PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
+PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" AXIOM_ADAPTER_FAILURE_FILE="$ADAPTER_FAILURE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || ADAPTER_EXIT=$?
 
 TARGET_STATUS_AFTER="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
@@ -300,7 +316,13 @@ fi
 read_cli_provenance || fail_run "cli_provenance_invalid"
 
 if [[ "$ADAPTER_EXIT" -ne 0 ]]; then
-  fail_run "agent_execution_failed"
+  ADAPTER_FAILURE_STATUS=0
+  ADAPTER_FAILURE_REASON="$(read_adapter_failure_reason)" || ADAPTER_FAILURE_STATUS=$?
+  case "$ADAPTER_FAILURE_STATUS" in
+    0) fail_run "$ADAPTER_FAILURE_REASON" ;;
+    1) fail_run "agent_execution_failed" ;;
+    *) fail_run "adapter_failure_reason_invalid" ;;
+  esac
 fi
 
 ADAPTER_END_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \

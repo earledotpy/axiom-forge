@@ -86,6 +86,27 @@ expect_runner_fail() {
   fi
 }
 
+assert_latest_failure_class() {
+  local name="$1"
+  local expected_class="$2"
+  local run_id
+
+  run_id="$(latest_numeric_run)"
+  if python - "runs/$run_id/record.json" "$expected_class" <<'PY'
+import json
+import sys
+
+record = json.load(open(sys.argv[1], encoding="utf-8"))
+assert record["run_status"] == "FAILED"
+assert record["failure_class"] == sys.argv[2]
+PY
+  then
+    pass "$name"
+  else
+    fail "$name"
+    cat "runs/$run_id/record.json" >&2
+  fi
+}
 expect_runner_pass() {
   local name="$1"
   shift
@@ -172,6 +193,27 @@ expect_runner_fail \
   "agent_execution_failed" \
   bash scripts/run_agent_task.sh bad-missing-cli-agent tasks/change-answer.task.md
 
+assert_latest_failure_class "R1a_missing_cli_classifies_task_incorrect" "task_incorrect"
+
+expect_runner_fail \
+  "R1c_quota_failure_records_stable_reason" \
+  "adapter_quota_exhausted" \
+  bash scripts/run_agent_task.sh bad-quota-agent tasks/change-answer.task.md
+
+assert_latest_failure_class "R1d_quota_failure_classifies_availability" "adapter_availability"
+
+expect_runner_fail \
+  "R1e_unavailable_failure_records_stable_reason" \
+  "adapter_cli_unavailable" \
+  bash scripts/run_agent_task.sh bad-unavailable-agent tasks/change-answer.task.md
+
+assert_latest_failure_class "R1f_unavailable_failure_classifies_availability" "adapter_availability"
+
+expect_runner_fail \
+  "R1g_invalid_adapter_failure_reason_fails_closed" \
+  "adapter_failure_reason_invalid" \
+  bash scripts/run_agent_task.sh bad-invalid-availability-agent tasks/change-answer.task.md
+
 RUN_ID="$(latest_numeric_run)"
 if python - "runs/$RUN_ID/record.json" <<'PY'
 import json
@@ -194,6 +236,8 @@ expect_runner_fail \
   "R2a_parent_write_records_failure" \
   "adapter_modified_outside_worktree" \
   env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh bad-parent-dirty-agent tasks/change-answer.task.md
+
+assert_latest_failure_class "R2a_parent_write_classifies_unsafe" "adapter_unsafe"
 
 RUN_ID="$(latest_numeric_run)"
 if grep -q '"run_status": "FAILED"' "runs/$RUN_ID/record.json"; then
@@ -248,6 +292,8 @@ expect_runner_fail \
   "R4_empty_patch_records_failure" \
   "agent_produced_empty_patch" \
   bash scripts/run_agent_task.sh bad-empty-agent tasks/change-answer.task.md
+
+assert_latest_failure_class "R4_empty_patch_classifies_task_incorrect" "task_incorrect"
 
 expect_runner_fail \
   "R5_bad_task_records_failure" \

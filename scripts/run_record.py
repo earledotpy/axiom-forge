@@ -12,6 +12,26 @@ FAILED = "FAILED"
 
 _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+ADAPTER_AVAILABILITY_FAILURES = {
+    "agent_adapter_not_found",
+    "adapter_cli_unavailable",
+    "adapter_quota_exhausted",
+    "adapter_unavailable",
+}
+ADAPTER_UNSAFE_FAILURES = {
+    "adapter_changed_forge_branches",
+    "adapter_changed_forge_head",
+    "adapter_changed_head",
+    "adapter_created_or_deleted_branch",
+    "adapter_left_detached_head",
+    "adapter_modified_forge_checkout",
+    "adapter_modified_outside_worktree",
+    "adapter_modified_target_repo",
+}
+TASK_INCORRECT_FAILURES = {
+    "agent_execution_failed",
+    "agent_produced_empty_patch",
+}
 
 
 class RunRecordError(Exception):
@@ -22,6 +42,19 @@ class RunRecordError(Exception):
 
 def clean(value):
     return None if value == "" else value
+
+
+def classify_failure(reason):
+    reason = clean(reason)
+    if reason is None:
+        return None
+    if reason in ADAPTER_AVAILABILITY_FAILURES:
+        return "adapter_availability"
+    if reason in ADAPTER_UNSAFE_FAILURES:
+        return "adapter_unsafe"
+    if reason in TASK_INCORRECT_FAILURES:
+        return "task_incorrect"
+    return "run_failed"
 
 
 def is_safe_run_id(value):
@@ -81,6 +114,7 @@ def build_record(
         "cli_version": clean(cli_version),
         "run_status": status,
         "failure_reason": clean(failure_reason),
+        "failure_class": classify_failure(failure_reason),
         "timestamp_utc": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat()

@@ -33,6 +33,7 @@ class RunRecordTests(unittest.TestCase):
         self.assertEqual(record["target_repo"], ".")
         self.assertEqual(record["patch_sha256"], "hash")
         self.assertIsNone(record["failure_reason"])
+        self.assertIsNone(record["failure_class"])
         self.assertEqual(record["cli_command"], "python")
         self.assertIn("timestamp_utc", record)
 
@@ -97,6 +98,36 @@ class RunRecordTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.reason, "run_not_completed")
 
+
+    def test_failure_reasons_are_classified_for_operator_evidence(self):
+        self.assertEqual(
+            run_record.classify_failure("adapter_quota_exhausted"),
+            "adapter_availability",
+        )
+        self.assertEqual(
+            run_record.classify_failure("adapter_modified_outside_worktree"),
+            "adapter_unsafe",
+        )
+        self.assertEqual(
+            run_record.classify_failure("agent_produced_empty_patch"),
+            "task_incorrect",
+        )
+        self.assertEqual(
+            run_record.classify_failure("target_remote_mismatch"),
+            "run_failed",
+        )
+
+    def test_failed_record_includes_failure_class(self):
+        record = run_record.build_record(
+            run_id="quota-fail",
+            agent="agent",
+            base_sha="abc123",
+            status="FAILED",
+            failure_reason="adapter_quota_exhausted",
+        )
+
+        self.assertEqual(record["failure_reason"], "adapter_quota_exhausted")
+        self.assertEqual(record["failure_class"], "adapter_availability")
 
     def test_failed_target_record_can_omit_unproven_target_identity(self):
         record = run_record.build_record(
