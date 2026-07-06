@@ -130,6 +130,11 @@ def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> 
     target_repo = require_string(record, "target_repo", "missing_target_repo")
     target_base_branch = require_string(record, "target_base_branch", "missing_target_base_branch")
     target_base_sha = require_string(record, "target_base_sha", "missing_target_base_sha")
+    delegation_target_base_sha = require_string(
+        record,
+        "delegation_target_base_sha",
+        "missing_delegation_target_base_sha",
+    )
     target_remote_url = require_string(record, "target_remote_url", "missing_target_remote_url")
     base_sha = require_string(record, "base_sha", "missing_base_sha")
     task_file = require_string(record, "delegation_task_file", "missing_delegation_task_file")
@@ -137,6 +142,8 @@ def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> 
 
     if target_base_sha != base_sha:
         raise TargetVerifyFailure("target_base_sha_mismatch")
+    if delegation_target_base_sha != target_base_sha:
+        raise TargetVerifyFailure("delegation_target_base_sha_mismatch")
     if target_name != target["name"]:
         raise TargetVerifyFailure("target_name_mismatch")
     if target_base_branch != target["expected_base_branch"]:
@@ -172,7 +179,7 @@ def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> 
         raise TargetVerifyFailure("target_remote_mismatch")
 
     commit = subprocess.run(
-        ["git", "-C", str(recorded_repo), "cat-file", "-e", f"{base_sha}^{{commit}}"],
+        ["git", "-C", str(recorded_repo), "cat-file", "-e", f"{delegation_target_base_sha}^{{commit}}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -180,7 +187,7 @@ def validate_context(record_path: Path, config_path: Path, forge_root: Path) -> 
     if commit.returncode != 0:
         raise TargetVerifyFailure("target_base_sha_not_found")
 
-    return {"repo_root": str(recorded_repo), "base_sha": base_sha}
+    return {"repo_root": str(recorded_repo), "base_sha": delegation_target_base_sha}
 
 
 def run_check(command, *, cwd: Path, timeout: int) -> tuple[dict, str | None]:

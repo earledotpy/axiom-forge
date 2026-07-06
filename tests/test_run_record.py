@@ -151,6 +151,7 @@ class RunRecordTests(unittest.TestCase):
             "target_scope_file": "allowed-paths.txt",
             "target_scope_sha256": "scope-hash",
             "delegation_artifact_revision": "0123456789abcdef0123456789abcdef01234567",
+            "delegation_target_base_sha": "abc123",
             "delegation_task_file": "tasks/change-answer.task.md",
         }
 
@@ -212,6 +213,7 @@ class RunRecordTests(unittest.TestCase):
             "target_scope_file": "allowed-paths.txt",
             "target_scope_sha256": "scope-hash",
             "delegation_artifact_revision": "0123456789abcdef0123456789abcdef01234567",
+            "delegation_target_base_sha": "abc123",
         }
 
         with self.assertRaises(run_record.RunRecordError) as caught:
@@ -232,6 +234,7 @@ class RunRecordTests(unittest.TestCase):
             "target_scope_file": "allowed-paths.txt",
             "target_scope_sha256": "scope-hash",
             "delegation_artifact_revision": "abc123",
+            "delegation_target_base_sha": "abc123",
         }
 
         with self.assertRaises(run_record.RunRecordError) as caught:

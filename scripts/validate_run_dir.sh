@@ -57,8 +57,9 @@ if [[ "$RUN_MODE" == "target" ]]; then
   DELEGATION_ARTIFACT_REVISION="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" delegation_artifact_revision)" || die "missing_delegation_artifact_revision"
   git -C "$SCRIPT_DIR/.." cat-file -e "$DELEGATION_ARTIFACT_REVISION^{commit}" 2>/dev/null || die "delegation_artifact_revision_not_found"
 
+  DELEGATION_TARGET_BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" delegation_target_base_sha)" || die "missing_delegation_target_base_sha"
   TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_repo)" || die "missing_target_repo"
-  git -C "$TARGET_REPO" cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
+  git -C "$TARGET_REPO" cat-file -e "$DELEGATION_TARGET_BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
 else
   git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "base_sha_not_found"
 fi

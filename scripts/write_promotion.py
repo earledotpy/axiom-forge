@@ -20,6 +20,7 @@ parser.add_argument("--promotion-commit", default="")
 parser.add_argument("--target-repo", default="")
 parser.add_argument("--target-name", default="")
 parser.add_argument("--target-base-branch", default="")
+parser.add_argument("--delegation-target-base-sha", default="")
 parser.add_argument("--target-remote-url", default="")
 args = parser.parse_args()
 
@@ -34,6 +35,7 @@ out = {
     "target_repo": clean(args.target_repo),
     "target_name": clean(args.target_name),
     "target_base_branch": clean(args.target_base_branch),
+    "delegation_target_base_sha": clean(args.delegation_target_base_sha),
     "target_remote_url": clean(args.target_remote_url),
     "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
 }

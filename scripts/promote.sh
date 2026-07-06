@@ -48,6 +48,7 @@ TARGET_REPO=""
 TARGET_NAME=""
 TARGET_BASE_BRANCH=""
 TARGET_REMOTE_URL=""
+DELEGATION_TARGET_BASE_SHA=""
 PROMOTION_REPO="$ROOT"
 VERIFY_FLAG=()
 POST_VERIFY_MODE="forge-local"
@@ -73,6 +74,7 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
   TARGET_NAME="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_name)" || die "missing_target_name"
   TARGET_BASE_BRANCH="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_base_branch)" || die "missing_target_base_branch"
   TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_remote_url)" || die "missing_target_remote_url"
+  DELEGATION_TARGET_BASE_SHA="$BASE_SHA"
   PROMOTION_REPO="$TARGET_REPO"
   VERIFY_FLAG=(--target)
   POST_VERIFY_MODE="target"
@@ -96,6 +98,7 @@ record_status() {
     --target-repo "$TARGET_REPO" \
     --target-name "$TARGET_NAME" \
     --target-base-branch "$TARGET_BASE_BRANCH" \
+    --delegation-target-base-sha "$DELEGATION_TARGET_BASE_SHA" \
     --target-remote-url "$TARGET_REMOTE_URL" \
     >/dev/null 2>&1 || true
 }
@@ -129,7 +132,11 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
 else
   CURRENT_BASE_SHA="$(git rev-parse "$DEFAULT_BASE")" || fail_closed "default_base_not_found"
 fi
-[[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
+if [[ "$TARGET_MODE" -eq 1 ]]; then
+  [[ "$DELEGATION_TARGET_BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_delegation_target_base"
+else
+  [[ "$BASE_SHA" == "$CURRENT_BASE_SHA" ]] || fail_closed "stale_base_sha"
+fi
 
 git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 || fail_closed "invalid_gate_branch_name"
 

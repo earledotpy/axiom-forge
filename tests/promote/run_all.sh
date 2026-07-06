@@ -184,6 +184,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_target_base_sha": base_sha,
     "delegation_task_file": "tasks/target-verify-fixture.task.md",
     "base_sha": base_sha,
     "task_file": "task.md",
@@ -523,10 +524,15 @@ git -C "$TARGET_REPO" add app/target.py
 git -C "$TARGET_REPO" commit -q -m "advance target base"
 expect_fail "T15_target_stale_base_fails" \
   bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
-if grep -q '"reason": "stale_base_sha"' "runs/$RUN_ID/promotion.json"; then
+if grep -q '"reason": "stale_delegation_target_base"' "runs/$RUN_ID/promotion.json"; then
   pass "T15a_target_stale_base_records_failure_reason"
 else
   fail "T15a_target_stale_base_records_failure_reason"
+fi
+if git -C "$TARGET_REPO" show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
+  fail "T15b_target_stale_base_creates_no_gate_branch"
+else
+  pass "T15b_target_stale_base_creates_no_gate_branch"
 fi
 cleanup_target_branch "$TARGET_REPO" "$RUN_ID"
 
@@ -581,6 +587,7 @@ assert record["status"] == "PROMOTED"
 assert record["target_name"] == "test-target"
 assert Path(record["target_repo"]).resolve() == Path(sys.argv[2]).resolve()
 assert record["target_base_branch"] == "main"
+assert record["delegation_target_base_sha"]
 assert record["target_remote_url"] == "https://example.test/target.git"
 assert record["branch"] == "gate/target-success"
 assert record["promotion_commit"]

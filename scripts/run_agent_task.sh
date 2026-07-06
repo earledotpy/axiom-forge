@@ -56,6 +56,7 @@ TARGET_PREFLIGHT_OUT="$RUN_DIR/target-preflight.out"
 TARGET_SCOPE_FILE=""
 TARGET_SCOPE_SHA256=""
 DELEGATION_ARTIFACT_REVISION=""
+DELEGATION_TARGET_BASE_SHA=""
 DELEGATION_TASK_FILE=""
 FORGE_HEAD_BEFORE=""
 FORGE_BRANCHES_BEFORE=""
@@ -91,6 +92,7 @@ write_record() {
     --target-scope-file "$TARGET_SCOPE_FILE" \
     --target-scope-sha256 "$TARGET_SCOPE_SHA256" \
     --delegation-artifact-revision "$DELEGATION_ARTIFACT_REVISION" \
+    --delegation-target-base-sha "$DELEGATION_TARGET_BASE_SHA" \
     --delegation-task-file "$DELEGATION_TASK_FILE" \
     --failure-reason "$reason"
 }
@@ -224,6 +226,7 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
     || fail_run "target_preflight_result_invalid"
   TARGET_BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" base_sha)" \
     || fail_run "target_preflight_result_invalid"
+  DELEGATION_TARGET_BASE_SHA="$TARGET_BASE_SHA"
   TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" remote_url)" \
     || fail_run "target_preflight_result_invalid"
   BASE_SHA="$TARGET_BASE_SHA"

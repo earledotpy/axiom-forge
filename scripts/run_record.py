@@ -50,6 +50,7 @@ def build_record(
     target_scope_file="",
     target_scope_sha256="",
     delegation_artifact_revision="",
+    delegation_target_base_sha="",
     delegation_task_file="",
 ):
     return {
@@ -65,6 +66,7 @@ def build_record(
         "target_scope_file": clean(target_scope_file),
         "target_scope_sha256": clean(target_scope_sha256),
         "delegation_artifact_revision": clean(delegation_artifact_revision),
+        "delegation_target_base_sha": clean(delegation_target_base_sha),
         "delegation_task_file": clean(delegation_task_file),
         "base_sha": base_sha,
         "task_file": clean(task_file),
@@ -159,6 +161,13 @@ def validate_completed_record(
             "missing_delegation_artifact_revision",
             "malformed_delegation_artifact_revision",
         )
+        delegation_target_base_sha = _required_non_empty_string(
+            record,
+            "delegation_target_base_sha",
+            "missing_delegation_target_base_sha",
+        )
+        if delegation_target_base_sha != target_base_sha:
+            raise RunRecordError("delegation_target_base_sha_mismatch")
         _required_non_empty_string(
             record,
             "delegation_task_file",
@@ -195,6 +204,7 @@ def _add_record_args(parser):
     parser.add_argument("--target-scope-file", default="")
     parser.add_argument("--target-scope-sha256", default="")
     parser.add_argument("--delegation-artifact-revision", default="")
+    parser.add_argument("--delegation-target-base-sha", default="")
     parser.add_argument("--delegation-task-file", default="")
 
 
@@ -236,6 +246,7 @@ def main():
             target_scope_file=args.target_scope_file,
             target_scope_sha256=args.target_scope_sha256,
             delegation_artifact_revision=args.delegation_artifact_revision,
+            delegation_target_base_sha=args.delegation_target_base_sha,
             delegation_task_file=args.delegation_task_file,
         )
         return 0

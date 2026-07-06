@@ -160,6 +160,7 @@ assert record["target_base_branch"] == "main"
 assert record["target_base_sha"] == base_sha
 assert record["base_sha"] == base_sha
 assert record["delegation_artifact_revision"] == sys.argv[4]
+assert record["delegation_target_base_sha"] == base_sha
 assert record["delegation_task_file"] == "tasks/change-answer.task.md"
 assert record["target_scope_file"] == "allowed-paths.txt"
 assert record["target_scope_sha256"]
@@ -240,6 +241,7 @@ target_repo = Path(sys.argv[2]).resolve()
 assert promotion["status"] == "PROMOTED"
 assert promotion["target_name"] == "test-target"
 assert Path(promotion["target_repo"]).resolve() == target_repo
+assert promotion["delegation_target_base_sha"]
 assert promotion["branch"].startswith("gate/")
 assert promotion["promotion_commit"]
 PY

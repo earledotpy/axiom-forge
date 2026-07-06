@@ -139,6 +139,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_target_base_sha": base_sha,
     "delegation_task_file": delegation_task_file,
     "base_sha": base_sha,
     "task_file": "task.md",
@@ -232,6 +233,7 @@ record = {
     "target_scope_file": "allowed-paths.txt",
     "target_scope_sha256": scope_sha,
     "delegation_artifact_revision": forge_revision,
+    "delegation_target_base_sha": base_sha,
     "delegation_task_file": delegation_task_file,
     "base_sha": base_sha,
     "task_file": "task.md",
@@ -536,6 +538,7 @@ path = Path(sys.argv[1])
 record = json.loads(path.read_text(encoding="utf-8"))
 record["base_sha"] = "0000000000000000000000000000000000000000"
 record["target_base_sha"] = "0000000000000000000000000000000000000000"
+record["delegation_target_base_sha"] = "0000000000000000000000000000000000000000"
 path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 PY
 expect_fail_reason \
