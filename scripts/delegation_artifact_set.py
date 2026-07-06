@@ -18,6 +18,47 @@ class DelegationArtifactSetError(Exception):
         self.reason = reason
 
 
+TARGET_REASON_MISSING_SCOPE = "missing_target_task_scope"
+TARGET_REASON_EMPTY_SCOPE = "empty_target_task_scope"
+TARGET_REASON_INVALID_SCOPE = "invalid_target_task_scope"
+TARGET_REASON_MISSING_ACCEPTANCE = "missing_target_acceptance_check"
+TARGET_REASON_INVALID_ACCEPTANCE = "invalid_target_acceptance_check"
+TARGET_REASON_ACCEPTANCE_IN_SCOPE = "target_acceptance_check_in_scope"
+
+TARGET_ARTIFACT_FAILURE_REASONS = frozenset(
+    {
+        TARGET_REASON_MISSING_SCOPE,
+        TARGET_REASON_EMPTY_SCOPE,
+        TARGET_REASON_INVALID_SCOPE,
+        TARGET_REASON_MISSING_ACCEPTANCE,
+        TARGET_REASON_INVALID_ACCEPTANCE,
+        TARGET_REASON_ACCEPTANCE_IN_SCOPE,
+    }
+)
+
+_TARGET_ARTIFACT_REASON_MAP = {
+    "missing_delegation_scope_file": TARGET_REASON_MISSING_SCOPE,
+    "target_scope_sidecar_missing": TARGET_REASON_MISSING_SCOPE,
+    "target_scope_empty": TARGET_REASON_EMPTY_SCOPE,
+    "missing_delegation_acceptance_check": TARGET_REASON_MISSING_ACCEPTANCE,
+    "empty_delegation_acceptance_check": TARGET_REASON_INVALID_ACCEPTANCE,
+}
+
+
+def target_artifact_failure_reason(reason: str | None) -> str:
+    if reason in _TARGET_ARTIFACT_REASON_MAP:
+        return _TARGET_ARTIFACT_REASON_MAP[reason]
+    if reason is not None and reason.startswith("target_scope_"):
+        return TARGET_REASON_INVALID_SCOPE
+    if reason in TARGET_ARTIFACT_FAILURE_REASONS:
+        return reason
+    return reason or "invalid_delegation_artifact_set"
+
+
+def target_artifact_error(reason: str | None) -> DelegationArtifactSetError:
+    return DelegationArtifactSetError(target_artifact_failure_reason(reason))
+
+
 @dataclass(frozen=True)
 class DelegationArtifactSet:
     task_file: str
@@ -161,20 +202,20 @@ def committed_acceptance_artifact(
     try:
         allowed_paths = load_scope_sidecar(Path(scope_file))
     except TargetTaskScopeError as exc:
-        raise DelegationArtifactSetError(exc.reason) from exc
+        raise target_artifact_error(exc.reason) from exc
 
     acceptance_path = acceptance_repo_path_for_task(delegation_task_file)
     if acceptance_path in allowed_paths:
-        raise DelegationArtifactSetError("target_acceptance_check_in_scope")
+        raise DelegationArtifactSetError(TARGET_REASON_ACCEPTANCE_IN_SCOPE)
 
     content = _committed_file_content(
         Path(forge_root),
         delegation_artifact_revision,
         acceptance_path,
-        "missing_target_acceptance_check",
+        TARGET_REASON_MISSING_ACCEPTANCE,
     )
     if not content.strip() or "\x00" in content or "\r" in content:
-        raise DelegationArtifactSetError("invalid_target_acceptance_check")
+        raise DelegationArtifactSetError(TARGET_REASON_INVALID_ACCEPTANCE)
 
     return {
         "path": acceptance_path,
@@ -220,36 +261,24 @@ def prepare_target_run_artifacts(
     try:
         artifact_set = load_task_artifact_set(task_file)
     except DelegationArtifactSetError as exc:
-        if exc.reason in {"target_scope_sidecar_missing", "missing_delegation_scope_file"}:
-            raise DelegationArtifactSetError("missing_target_task_scope") from exc
-        if exc.reason == "target_scope_empty":
-            raise DelegationArtifactSetError("empty_target_task_scope") from exc
-        if exc.reason.startswith("target_scope_"):
-            raise DelegationArtifactSetError("invalid_target_task_scope") from exc
-        raise
+        raise target_artifact_error(exc.reason) from exc
 
     if artifact_set.state != "delegation-ready":
-        if artifact_set.reason == "missing_delegation_scope_file":
-            raise DelegationArtifactSetError("missing_target_task_scope")
-        if artifact_set.reason == "missing_delegation_acceptance_check":
-            raise DelegationArtifactSetError("missing_target_acceptance_check")
-        if artifact_set.reason == "empty_delegation_acceptance_check":
-            raise DelegationArtifactSetError("invalid_target_acceptance_check")
-        raise DelegationArtifactSetError(artifact_set.reason or "invalid_delegation_artifact_set")
+        raise target_artifact_error(artifact_set.reason)
 
     acceptance_file = Path(artifact_set.acceptance_file)
     acceptance_repo_path = _repo_relative(acceptance_file.resolve(), forge_root)
     if acceptance_repo_path in artifact_set.approved_paths:
-        raise DelegationArtifactSetError("target_acceptance_check_in_scope")
+        raise DelegationArtifactSetError(TARGET_REASON_ACCEPTANCE_IN_SCOPE)
 
     content = _committed_file_content(
         forge_root,
         delegation_artifact_revision,
         acceptance_repo_path,
-        "missing_target_acceptance_check",
+        TARGET_REASON_MISSING_ACCEPTANCE,
     )
     if not content.strip():
-        raise DelegationArtifactSetError("invalid_target_acceptance_check")
+        raise DelegationArtifactSetError(TARGET_REASON_INVALID_ACCEPTANCE)
 
     copied_scope = run_dir / "allowed-paths.txt"
     try:
@@ -257,7 +286,7 @@ def prepare_target_run_artifacts(
     except OSError as exc:
         raise DelegationArtifactSetError("target_task_scope_copy_failed") from exc
     if not copied_scope.exists() or copied_scope.stat().st_size == 0:
-        raise DelegationArtifactSetError("empty_target_task_scope")
+        raise DelegationArtifactSetError(TARGET_REASON_EMPTY_SCOPE)
 
     try:
         target_scope_sha256 = _sha256_file(copied_scope)

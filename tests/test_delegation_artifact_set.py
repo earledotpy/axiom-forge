@@ -98,6 +98,30 @@ class DelegationArtifactSetTests(unittest.TestCase):
             frozenset({"app/target.py", "tests/test_target.py"}),
         )
 
+    def test_target_artifact_failure_reason_owns_stable_vocabulary(self):
+        cases = {
+            "missing_delegation_scope_file": "missing_target_task_scope",
+            "target_scope_sidecar_missing": "missing_target_task_scope",
+            "target_scope_empty": "empty_target_task_scope",
+            "target_scope_traversal": "invalid_target_task_scope",
+            "missing_delegation_acceptance_check": "missing_target_acceptance_check",
+            "empty_delegation_acceptance_check": "invalid_target_acceptance_check",
+            "missing_target_acceptance_check": "missing_target_acceptance_check",
+            "invalid_target_acceptance_check": "invalid_target_acceptance_check",
+            "target_acceptance_check_in_scope": "target_acceptance_check_in_scope",
+        }
+
+        for reason, expected in cases.items():
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    delegation_artifact_set.target_artifact_failure_reason(reason),
+                    expected,
+                )
+
+        self.assertEqual(
+            delegation_artifact_set.target_artifact_failure_reason(None),
+            "invalid_delegation_artifact_set",
+        )
 
     def test_prepare_target_run_artifacts_copies_scope_and_records_evidence(self):
         task = self.write_task("ready", "app/target.py\n")
@@ -230,6 +254,23 @@ class DelegationArtifactSetTests(unittest.TestCase):
             )
 
         self.assertEqual(caught.exception.reason, "target_acceptance_check_in_scope")
+
+    def test_committed_acceptance_artifact_maps_invalid_copied_scope(self):
+        _, revision = self.write_committed_task("ready", "app/target.py\n", "echo ok\n")
+        scope_file = self.root / "run-scope.txt"
+        scope_file.write_text("../outside.py\n", encoding="utf-8")
+
+        with self.assertRaises(delegation_artifact_set.DelegationArtifactSetError) as caught:
+            delegation_artifact_set.committed_acceptance_artifact_from_record(
+                forge_root=self.root,
+                record={
+                    "delegation_artifact_revision": revision,
+                    "delegation_task_file": "tasks/ready.task.md",
+                },
+                scope_file=scope_file,
+            )
+
+        self.assertEqual(caught.exception.reason, "invalid_target_task_scope")
 
 
 if __name__ == "__main__":
