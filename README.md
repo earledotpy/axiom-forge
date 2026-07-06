@@ -47,6 +47,14 @@ In target mode, the external target repository receives only source changes from
 
 Target-mode tasks must include a Forge-owned target task scope sidecar next to the task file. A task named `tasks/<name>.task.md` pairs with `tasks/<name>.allowed-paths.txt`. The sidecar contains exact target-repository-relative file paths, one per line, using forward slashes. Blank lines are ignored, and lines beginning with `#` are comments.
 
+Before parallel target-mode delegation, check the active delegation-ready task set for overlapping approved scopes:
+
+```bash
+python scripts/check_concurrent_task_scopes.py tasks/one.task.md tasks/two.task.md
+```
+
+The check treats only tasks with a runnable task file, approved scope sidecar, and non-empty acceptance check as delegation-ready. If two delegation-ready tasks approve the same target path, it fails with `concurrent_task_scope_conflict`; draft adapter selection remains planning metadata and does not start delegation.
+
 Failed runs are evidence. They are not promotable inputs.
 
 ## Configured Target Repository
