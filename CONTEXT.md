@@ -137,7 +137,7 @@ An operator-editable task draft produced from planning source material before it
 _Avoid_: runnable task file, delegated task, hidden plan state
 
 **Delegation artifact set**:
-The committed runnable task file, approved path-scope sidecar, and operator-approved acceptance check created together from an approved draft task artifact. The set must stay synchronized because it is the adapter-facing delegation authority; changes return it to draft state and require regeneration.
+The committed runnable task file, approved path-scope sidecar, and operator-approved acceptance check created together from an approved draft task artifact. The set must stay synchronized because it is the adapter-facing delegation authority; changes return it to draft state and require regeneration. `scripts/delegation_artifact_set.py` is the internal ownership point for Delegation artifact set readiness, committed artifact lookup, and copied Forge-owned evidence rules; shell commands remain the operator-facing interfaces.
 _Avoid_: partial task files, separate approval outputs, unsynchronized delegation files
 
 **Delegation artifact revision**:

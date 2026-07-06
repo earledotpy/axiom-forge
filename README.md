@@ -55,6 +55,16 @@ python scripts/check_concurrent_task_scopes.py tasks/one.task.md tasks/two.task.
 
 The check treats only tasks with a runnable task file, approved scope sidecar, and non-empty acceptance check as delegation-ready. If two delegation-ready tasks approve the same target path, it fails with `concurrent_task_scope_conflict`; draft adapter selection remains planning metadata and does not start delegation.
 
+`scripts/delegation_artifact_set.py` owns the internal Delegation artifact set rules. It decides whether a task file, Target task scope sidecar, and Operator-approved acceptance check form a Delegation-ready task; records the Delegation artifact revision used for a captured run; copies approved scope evidence into `runs/<run-id>/allowed-paths.txt`; and resolves the committed acceptance check used during target-mode verification. The shell commands remain the operator-facing interfaces:
+
+```bash
+bash scripts/run_agent_task.sh --target <agent-name> <task-file>
+bash scripts/verify_patch.sh --target "runs/<run-id>"
+bash scripts/promote.sh --target "runs/<run-id>"
+```
+
+Target-mode verification uses copied Forge-owned evidence from the run directory plus committed artifact lookup from the recorded Delegation artifact revision. It does not trust the latest mutable task sidecar or acceptance file beside the task after the captured run exists. Historical run evidence is not migrated by this internal refactor; existing `runs/<run-id>/` directories remain evidence in the shape they were captured.
+
 Failed runs are evidence. They are not promotable inputs.
 
 ## Configured Target Repository
@@ -334,6 +344,8 @@ bash scripts/verify_patch.sh --target "runs/<run-id>"
 Verification validates the run directory, creates a disposable verifier worktree from the recorded base, applies the patch with whitespace checks, runs the configured verification command, writes `verify.json`, and leaves no verifier worktree behind.
 
 Target-mode verification additionally validates that the run record still matches the configured primary target repository before using the target repository as the verifier source.
+
+For target-mode runs, verification loads scope from the copied `runs/<run-id>/allowed-paths.txt` evidence and loads the Operator-approved acceptance check from the committed Delegation artifact revision recorded in `record.json`. This preserves the command contract while preventing later edits to `tasks/<name>.allowed-paths.txt` or `tasks/<name>.accept.sh` from changing what an existing captured run can verify or promote.
 
 ## Promotion Contract
 

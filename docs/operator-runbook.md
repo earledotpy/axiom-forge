@@ -140,6 +140,18 @@ docs/usage.md
 
 Blank lines and lines beginning with `#` are ignored. Absolute paths, `..` traversal, globs, directory entries, and backslash-separated paths are invalid.
 
+The internal owner for these rules is `scripts/delegation_artifact_set.py`. It treats a task as a Delegation-ready task only when the runnable task file, Target task scope sidecar, and Operator-approved acceptance check are all present and valid. It also records the Delegation artifact revision, copies approved scope into Forge-owned evidence under `runs/<run-id>/allowed-paths.txt`, and resolves the committed acceptance check during target-mode verification.
+
+Operators still use the shell commands as the public interface. Do not call the module directly during normal operation:
+
+```bash
+bash scripts/run_agent_task.sh --target <agent-name> <task-file>
+bash scripts/verify_patch.sh --target "runs/$RUN_ID"
+printf "%s\n" "$RUN_ID" | bash scripts/promote.sh --target "runs/$RUN_ID"
+```
+
+After a target-mode captured run exists, verification and promotion use copied run evidence and committed artifact lookup. They do not use the latest mutable task sidecar or acceptance file as authority for that historical run. Existing historical run evidence is not migrated by this refactor; keep treating older `runs/<run-id>/` directories as captured evidence in their recorded shape.
+
 Set the run id:
 
 ```bash
