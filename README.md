@@ -369,6 +369,14 @@ Promotion fails closed if any required condition is missing, including a dirty p
 
 ## Operator Workflow Examples
 
+Local workbench draft preview:
+
+```bash
+python scripts/workbench.py --open
+```
+
+This starts a browser-based local workbench at `http://127.0.0.1:8765/`. In this first slice, loading a GitHub Issue creates only an editable draft preview for task text, target scope, acceptance check, and adapter selection. It does not write delegation artifacts, run adapters, run verification, expose promotion, or create a database.
+
 Forge-local run:
 
 ```bash
