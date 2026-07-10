@@ -5,6 +5,7 @@ import json
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
+import re
 
 try:
     from target_task_scope import TargetTaskScopeError, load_scope_sidecar
@@ -16,6 +17,10 @@ class DelegationArtifactSetError(Exception):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+WORKBENCH_APPROVED_ADAPTER_RE = re.compile(
+    r"^<!-- axiom-forge-workbench-approved-adapter: ([a-z0-9-]+) -->$")
 
 
 TARGET_REASON_MISSING_SCOPE = "missing_target_task_scope"
@@ -67,6 +72,17 @@ class DelegationArtifactSet:
     approved_paths: frozenset[str]
     state: str
     reason: str | None = None
+    approved_adapter: str | None = None
+
+
+def approved_adapter_for_task(task_file: Path) -> str | None:
+    first_line = Path(task_file).read_text(encoding="utf-8").split("\n", 1)[0]
+    if not first_line.startswith("<!-- axiom-forge-workbench-approved-adapter:"):
+        return None
+    match = WORKBENCH_APPROVED_ADAPTER_RE.fullmatch(first_line)
+    if not match:
+        raise DelegationArtifactSetError("invalid_approved_adapter")
+    return match.group(1)
 
 
 def _task_stem(task_file: Path) -> str:
@@ -89,6 +105,7 @@ def load_task_artifact_set(task_file: Path) -> DelegationArtifactSet:
     task_file = Path(task_file)
     if not task_file.exists():
         raise DelegationArtifactSetError("missing_delegation_task_file")
+    approved_adapter = approved_adapter_for_task(task_file)
 
     scope_file = scope_sidecar_path(task_file)
     acceptance_file = acceptance_check_path(task_file)
@@ -134,6 +151,7 @@ def load_task_artifact_set(task_file: Path) -> DelegationArtifactSet:
         acceptance_file=acceptance_file.as_posix(),
         approved_paths=approved_paths,
         state="delegation-ready",
+        approved_adapter=approved_adapter,
     )
 
 
