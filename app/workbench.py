@@ -123,6 +123,12 @@ class ConfirmedExecution:
     task_file: str
 
 
+@dataclass(frozen=True)
+class ConfirmedRetry:
+    run_id: str
+    adapter: str
+
+
 VerificationRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 IssueFetcher = Callable[[IssueReference], IssueContext]
 TargetRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
@@ -300,14 +306,21 @@ class WorkbenchServer:
     def execute_confirmed_delegation(self, payload: object) -> CapturedRun:
         execution = _parse_confirmed_execution(payload)
         _, adapter = _approved_execution_target(self.forge_root, execution.task_file)
+        return self._run_confirmed_delegation(execution.task_file, adapter)
+
+    def retry_confirmed_delegation(self, payload: object) -> CapturedRun:
+        retry = _parse_confirmed_retry(payload)
+        task_file = _retry_execution_target(self.forge_root, retry.run_id)
+        return self._run_confirmed_delegation(task_file, retry.adapter)
+
+    def _run_confirmed_delegation(self, task_file: str, adapter: str) -> CapturedRun:
         command = [
             "bash",
             str(self.forge_root / "scripts" / "run_agent_task.sh"),
             "--target",
             adapter,
-            execution.task_file,
+            task_file,
         ]
-
         with self._active_delegation_lock:
             if self._active_delegation:
                 raise WorkbenchExecutionError("active_workbench_delegation_in_progress")
@@ -400,6 +413,20 @@ def _parse_confirmed_execution(payload: object) -> ConfirmedExecution:
     return ConfirmedExecution(task_file=task_file)
 
 
+def _parse_confirmed_retry(payload: object) -> ConfirmedRetry:
+    if not isinstance(payload, dict) or set(payload) != {"run_id", "adapter", "confirmed"}:
+        raise WorkbenchExecutionError("invalid_retry_request")
+    if payload.get("confirmed") is not True:
+        raise WorkbenchExecutionError("operator_retry_confirmation_required")
+    run_id = payload.get("run_id")
+    adapter = payload.get("adapter")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise WorkbenchExecutionError("invalid_captured_run_reference")
+    if not isinstance(adapter, str) or adapter not in DEFAULT_ADAPTERS:
+        raise WorkbenchExecutionError("invalid_retry_adapter")
+    return ConfirmedRetry(run_id=run_id, adapter=adapter)
+
+
 def _approved_execution_target(root: Path, task_file_value: str) -> tuple[Path, str]:
     try:
         task_path = validate_delegation_task_file(task_file_value)
@@ -413,6 +440,49 @@ def _approved_execution_target(root: Path, task_file_value: str) -> tuple[Path, 
         raise WorkbenchExecutionError("invalid_approved_delegation")
     return task_file, artifact_set.approved_adapter
 
+
+def _retry_execution_target(root: Path, run_id: str) -> str:
+    try:
+        run_dir = _captured_run_directory(root, run_id)
+        summary = _operator_evidence_summary(run_dir)
+    except WorkbenchVerificationError as error:
+        raise WorkbenchExecutionError(str(error)) from error
+    if summary.run_status != "FAILED" and summary.verification_result != "FAIL":
+        raise WorkbenchExecutionError("captured_run_not_retryable")
+
+    record = _evidence_json(run_dir / "record.json")
+    task_file = record.get("delegation_task_file")
+    revision = record.get("delegation_artifact_revision")
+    if not isinstance(task_file, str) or not isinstance(revision, str) or not revision:
+        raise WorkbenchExecutionError("retry_delegation_provenance_unavailable")
+    task_path, _ = _approved_execution_target(root, task_file)
+    _require_retry_delegation_boundary(root, revision, task_path)
+    return task_file
+
+
+def _require_retry_delegation_boundary(root: Path, revision: str, task_file: Path) -> None:
+    for artifact in (task_file, scope_sidecar_path(task_file), acceptance_check_path(task_file)):
+        try:
+            repo_path = artifact.relative_to(root).as_posix()
+            current_content = artifact.read_text(encoding="utf-8")
+        except (OSError, ValueError) as error:
+            raise WorkbenchExecutionError("retry_delegation_provenance_unavailable") from error
+        expected_content = _retry_revision_artifact_content(root, revision, repo_path)
+        if current_content != expected_content:
+            raise WorkbenchExecutionError("retry_delegation_boundary_changed")
+
+
+def _retry_revision_artifact_content(root: Path, revision: str, repo_path: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "show", f"{revision}:{repo_path}"],
+        text=True,
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise WorkbenchExecutionError("retry_delegation_provenance_unavailable")
+    return result.stdout
 
 def _run_target_mode_runner(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
@@ -509,6 +579,13 @@ def _operator_evidence_summary(
         next_allowed_actions=_next_allowed_actions(run_status, verification_result),
     )
 
+
+def _evidence_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 def _verification_summary(
     run_dir: Path, verification_failure_reason: str | None
@@ -684,6 +761,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/run":
                 self._handle_run()
                 return
+            if parsed.path == "/api/retry":
+                self._handle_retry()
+                return
             if parsed.path == "/api/verify":
                 self._handle_verify()
                 return
@@ -722,6 +802,19 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                     raise WorkbenchExecutionError("invalid_execution_request")
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 captured_run = workbench.execute_confirmed_delegation(payload)
+            except (UnicodeDecodeError, ValueError, WorkbenchExecutionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+
+            self._write_json(asdict(captured_run), HTTPStatus.CREATED)
+
+        def _handle_retry(self) -> None:
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length < 1 or content_length > 1_000_000:
+                    raise WorkbenchExecutionError("invalid_retry_request")
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                captured_run = workbench.retry_confirmed_delegation(payload)
             except (UnicodeDecodeError, ValueError, WorkbenchExecutionError) as error:
                 self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -1104,6 +1197,7 @@ WORKBENCH_HTML = """<!doctype html>
     const executionResult = document.querySelector("#execution-result");
     const runButton = document.querySelector("#run-button");
     const evidenceSummary = document.querySelector("#evidence-summary");
+    const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
     let loadedIssue = null;
     let approvedDelegation = null;
 
@@ -1280,6 +1374,65 @@ WORKBENCH_HTML = """<!doctype html>
           }
         });
         evidenceSummary.append(verifyButton);
+      }
+      if (payload.run_status === "FAILED" || payload.verification_result === "FAIL") {
+        const retry = document.createElement("div");
+        retry.className = "execution";
+        const retryNote = document.createElement("div");
+        retryNote.className = "meta";
+        retryNote.textContent = "Retry creates a new captured run from this run's recorded approved task and scope. It does not change the failed evidence.";
+        const retryLabel = document.createElement("label");
+        retryLabel.textContent = "Retry adapter";
+        const retryAdapter = document.createElement("select");
+        retryAdapters.forEach((adapter) => {
+          const option = document.createElement("option");
+          option.value = adapter;
+          option.textContent = adapter;
+          option.selected = adapter === payload.adapter;
+          retryAdapter.append(option);
+        });
+        if (!retryAdapters.includes(payload.adapter)) retryAdapter.value = retryAdapters[0];
+        const retryConfirmationLabel = document.createElement("label");
+        const retryConfirmation = document.createElement("input");
+        retryConfirmation.type = "checkbox";
+        retryConfirmationLabel.append(retryConfirmation, "I confirm that I want to retry this approved task now.");
+        const retryButton = document.createElement("button");
+        retryButton.type = "button";
+        retryButton.textContent = "Retry Approved Task";
+        retryButton.addEventListener("click", async () => {
+          error.classList.add("hidden");
+          retryButton.disabled = true;
+          try {
+            const failedEvidenceSummary = evidenceSummary.cloneNode(true);
+            const retryResponse = await fetch("/api/retry", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                run_id: runId,
+                adapter: retryAdapter.value,
+                confirmed: retryConfirmation.checked,
+              }),
+            });
+            const retryPayload = await retryResponse.json();
+            if (!retryResponse.ok) {
+              throw new Error(retryPayload.error || "retry_failed");
+            }
+            await renderEvidenceSummary(retryPayload.run_id);
+            const priorEvidence = document.createElement("details");
+            priorEvidence.open = true;
+            const priorEvidenceTitle = document.createElement("summary");
+            priorEvidenceTitle.textContent = `Prior failed evidence summary: ${runId}`;
+            priorEvidence.append(priorEvidenceTitle, failedEvidenceSummary);
+            evidenceSummary.prepend(priorEvidence);
+          } catch (retryError) {
+            error.textContent = retryError.message;
+            error.classList.remove("hidden");
+          } finally {
+            retryButton.disabled = false;
+          }
+        });
+        retry.append(retryNote, retryLabel, retryAdapter, retryConfirmationLabel, retryButton);
+        evidenceSummary.append(retry);
       }
       const details = document.createElement("details");
       const summary = document.createElement("summary");

@@ -72,6 +72,15 @@ class TestWorkbench(unittest.TestCase):
         payload.update(overrides)
         return payload
 
+    def retry_payload(self, **overrides):
+        payload = {
+            'run_id': '20260712-010203-123456',
+            'adapter': 'claude-code',
+            'confirmed': True,
+        }
+        payload.update(overrides)
+        return payload
+
     def approve_delegation(self, workbench: WorkbenchServer):
         workbench.approve_draft(self.approval_payload())
 
@@ -88,8 +97,16 @@ class TestWorkbench(unittest.TestCase):
     def write_target_run_evidence(root: Path, run_id: str, record: dict | None = None) -> Path:
         run_dir = root / 'runs' / run_id
         run_dir.mkdir(parents=True)
+        record = record or {'run_id': run_id, 'run_status': 'COMPLETED', 'failure_reason': None, 'agent': 'codex', 'run_mode': 'target'}
+        if 'delegation_task_file' in record and 'delegation_artifact_revision' not in record:
+            record = {
+                **record,
+                'delegation_artifact_revision': subprocess.check_output(
+                    ['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True
+                ).strip(),
+            }
         run_dir.joinpath('record.json').write_text(
-            json.dumps(record or {'run_id': run_id, 'run_status': 'COMPLETED', 'failure_reason': None, 'agent': 'codex', 'run_mode': 'target'}),
+            json.dumps(record),
             encoding='utf-8',
         )
         run_dir.joinpath('task.md').write_text('Implement the target widget.\n', encoding='utf-8')
@@ -356,6 +373,225 @@ class TestWorkbench(unittest.TestCase):
         self.assertFalse(first.is_alive())
         self.assertEqual(first_result[0].run_id, run_id)
 
+    def test_retry_requires_confirmation_and_does_not_start_automatically(self):
+        calls = []
+        workbench, root = self.make_workbench(target_runner=lambda command, root: calls.append(command))
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.retry_confirmed_delegation(self.retry_payload(confirmed=False))
+
+        self.assertEqual(str(caught.exception), 'operator_retry_confirmation_required')
+        self.assertEqual(calls, [])
+
+    def test_retry_uses_the_failed_run_approved_task_with_the_selected_adapter(self):
+        calls = []
+        retry_id = '20260712-010204-654321'
+
+        def target_runner(command, root):
+            calls.append((command, root))
+            self.write_run_record(root, retry_id)
+            return subprocess.CompletedProcess(command, 0, f'RUN_CAPTURED: {retry_id}\n', '')
+
+        workbench, root = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+
+        captured_run = workbench.retry_confirmed_delegation(self.retry_payload())
+
+        self.assertEqual(captured_run.run_id, retry_id)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    [
+                        'bash',
+                        str(root / 'scripts' / 'run_agent_task.sh'),
+                        '--target',
+                        'claude-code',
+                        'tasks/workbench-issue-49.task.md',
+                    ],
+                    root,
+                )
+            ],
+        )
+
+    def test_retry_rejects_a_run_without_failed_or_unusable_evidence(self):
+        calls = []
+        workbench, root = self.make_workbench(target_runner=lambda command, root: calls.append(command))
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.retry_confirmed_delegation(self.retry_payload())
+
+        self.assertEqual(str(caught.exception), 'captured_run_not_retryable')
+        self.assertEqual(calls, [])
+
+    def test_retry_rejects_changed_delegation_boundary(self):
+        calls = []
+        workbench, root = self.make_workbench(target_runner=lambda command, root: calls.append(command))
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+        (root / 'tasks' / 'workbench-issue-49.allowed-paths.txt').write_text(
+            'app/other.py\n', encoding='utf-8'
+        )
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.retry_confirmed_delegation(self.retry_payload())
+
+        self.assertEqual(str(caught.exception), 'retry_delegation_boundary_changed')
+        self.assertEqual(calls, [])
+    def test_retry_accepts_unusable_verification_evidence(self):
+        retry_id = '20260712-010204-654321'
+
+        def target_runner(command, root):
+            self.write_run_record(root, retry_id)
+            return subprocess.CompletedProcess(command, 0, f'RUN_CAPTURED: {retry_id}\n', '')
+
+        workbench, root = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        failed_verification = self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+        failed_verification.joinpath('verify.json').write_text(
+            json.dumps({'status': 'FAIL', 'reason': 'target_acceptance_failed'}), encoding='utf-8'
+        )
+
+        captured_run = workbench.retry_confirmed_delegation(self.retry_payload())
+
+        self.assertEqual(captured_run.run_id, retry_id)
+
+    def test_retry_is_blocked_while_another_delegation_is_active(self):
+        started = Event()
+        release = Event()
+        run_id = '20260712-010203-123456'
+
+        def target_runner(command, root):
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+            self.write_run_record(root, run_id)
+            return subprocess.CompletedProcess(command, 0, f'RUN_CAPTURED: {run_id}\n', '')
+
+        workbench, root = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123457',
+            {
+                'run_id': '20260712-010203-123457',
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+        active = Thread(target=lambda: workbench.execute_confirmed_delegation(self.execute_payload()))
+        active.start()
+        self.assertTrue(started.wait(timeout=5))
+        try:
+            with self.assertRaises(WorkbenchExecutionError) as caught:
+                workbench.retry_confirmed_delegation(
+                    self.retry_payload(run_id='20260712-010203-123457')
+                )
+            self.assertEqual(str(caught.exception), 'active_workbench_delegation_in_progress')
+        finally:
+            release.set()
+            active.join(timeout=5)
+
+        self.assertFalse(active.is_alive())
+
+    def test_http_retry_requires_confirmation_and_uses_the_selected_adapter(self):
+        retry_id = '20260712-010204-654321'
+        calls = []
+
+        def target_runner(command, root):
+            calls.append(command)
+            self.write_run_record(root, retry_id)
+            return subprocess.CompletedProcess(command, 0, f'RUN_CAPTURED: {retry_id}\n', '')
+
+        workbench, root = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        self.write_target_run_evidence(
+            root,
+            '20260712-010203-123456',
+            {
+                'run_id': '20260712-010203-123456',
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f'http://127.0.0.1:{server.server_port}/api/retry',
+                data=json.dumps(self.retry_payload()).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urlopen(request) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(payload['run_id'], retry_id)
+        self.assertEqual(calls[0][-2:], ['claude-code', 'tasks/workbench-issue-49.task.md'])
+
     def test_http_execution_endpoint_returns_captured_run_identity_and_status(self):
         run_id = "20260712-010203-123456"
 
@@ -505,6 +741,18 @@ class TestWorkbench(unittest.TestCase):
             self.assertIn(field, WORKBENCH_HTML)
         self.assertIn('renderEvidenceSummary', WORKBENCH_HTML)
         self.assertIn('/api/runs/${runId}/details', WORKBENCH_HTML)
+
+    def test_workbench_html_presents_confirmed_operator_directed_retry(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Retry Approved Task', WORKBENCH_HTML)
+        self.assertIn('I confirm that I want to retry this approved task now.', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/retry"', WORKBENCH_HTML)
+        self.assertIn('adapter: retryAdapter.value', WORKBENCH_HTML)
+        self.assertIn('confirmed: retryConfirmation.checked', WORKBENCH_HTML)
+        self.assertIn('Prior failed evidence summary', WORKBENCH_HTML)
+        self.assertIn('evidenceSummary.cloneNode(true)', WORKBENCH_HTML)
+
     def test_http_summary_keeps_raw_evidence_in_the_drill_down_endpoint(self):
         run_id = '20260712-010203-123456'
         workbench, root = self.make_workbench()
@@ -528,5 +776,6 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(details['stdout'], 'adapter stdout\n')
         self.assertEqual(details['stderr'], 'adapter stderr\n')
         self.assertIn('diff --git', details['patch_diff'])
+
 if __name__ == "__main__":
     unittest.main()
