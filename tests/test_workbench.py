@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from urllib.request import Request, urlopen
 
 from scripts.delegation_artifact_set import load_task_artifact_set
@@ -13,6 +13,7 @@ from app.workbench import (
     IssueContext,
     IssueReference,
     WorkbenchApprovalError,
+    WorkbenchExecutionError,
     WorkbenchServer,
     issue_to_draft_preview,
     make_handler,
@@ -33,7 +34,7 @@ FIXTURE_ISSUE = IssueContext(
 
 
 class TestWorkbench(unittest.TestCase):
-    def make_workbench(self) -> tuple[WorkbenchServer, Path]:
+    def make_workbench(self, target_runner=None) -> tuple[WorkbenchServer, Path]:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         root = Path(temporary_directory.name)
@@ -43,7 +44,11 @@ class TestWorkbench(unittest.TestCase):
         (root / "README.md").write_text("fixture\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
         subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True)
-        return WorkbenchServer(lambda reference: FIXTURE_ISSUE, forge_root=root), root
+        return WorkbenchServer(
+            lambda reference: FIXTURE_ISSUE,
+            forge_root=root,
+            target_runner=target_runner,
+        ), root
 
     def approval_payload(self, **overrides):
         payload = {
@@ -56,6 +61,26 @@ class TestWorkbench(unittest.TestCase):
         }
         payload.update(overrides)
         return payload
+
+    def execute_payload(self, **overrides):
+        payload = {
+            'task_file': 'tasks/workbench-issue-49.task.md',
+            'confirmed': True,
+        }
+        payload.update(overrides)
+        return payload
+
+    def approve_delegation(self, workbench: WorkbenchServer):
+        workbench.approve_draft(self.approval_payload())
+
+    @staticmethod
+    def write_run_record(root: Path, run_id: str, status: str = 'COMPLETED') -> None:
+        run_dir = root / 'runs' / run_id
+        run_dir.mkdir(parents=True)
+        record = {'run_id': run_id, 'run_status': status}
+        if status == 'FAILED':
+            record['failure_reason'] = 'adapter_unavailable'
+        (run_dir / 'record.json').write_text(json.dumps(record), encoding='utf-8')
 
     def test_parse_issue_reference_accepts_number_hash_and_url(self):
         self.assertEqual(parse_issue_reference("49", "owner/repo"), IssueReference(49, "owner/repo"))
@@ -219,6 +244,124 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(payload["adapter"], "codex")
         self.assertTrue((root / payload["task_file"]).exists())
 
+    def test_confirmed_execution_runs_only_the_approved_target_mode_task(self):
+        calls = []
+        run_id = "20260712-010203-123456"
+
+        def target_runner(command, root):
+            calls.append((command, root))
+            self.write_run_record(root, run_id)
+            return subprocess.CompletedProcess(command, 0, f"RUN_CAPTURED: {run_id}\n", "")
+
+        workbench, root = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+
+        captured_run = workbench.execute_confirmed_delegation(self.execute_payload())
+
+        self.assertEqual(captured_run.run_id, run_id)
+        self.assertEqual(captured_run.run_status, "COMPLETED")
+        self.assertIsNone(captured_run.failure_reason)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    [
+                        "bash",
+                        str(root / "scripts" / "run_agent_task.sh"),
+                        "--target",
+                        "codex",
+                        "tasks/workbench-issue-49.task.md",
+                    ],
+                    root,
+                )
+            ],
+        )
+
+    def test_execution_requires_confirmation_without_starting_a_runner(self):
+        calls = []
+        workbench, _ = self.make_workbench(target_runner=lambda command, root: calls.append(command))
+        self.approve_delegation(workbench)
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.execute_confirmed_delegation(self.execute_payload(confirmed=False))
+
+        self.assertEqual(str(caught.exception), "operator_execution_confirmation_required")
+        self.assertEqual(calls, [])
+
+    def test_execution_rejects_generic_command_requests_without_starting_a_runner(self):
+        calls = []
+        workbench, _ = self.make_workbench(target_runner=lambda command, root: calls.append(command))
+        self.approve_delegation(workbench)
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.execute_confirmed_delegation(
+                self.execute_payload(command=["bash", "arbitrary-command.sh"])
+            )
+
+        self.assertEqual(str(caught.exception), "generic_command_execution_forbidden")
+        self.assertEqual(calls, [])
+
+    def test_execution_rejects_a_second_active_delegation(self):
+        started = Event()
+        release = Event()
+        run_id = "20260712-010203-123456"
+
+        def target_runner(command, root):
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+            self.write_run_record(root, run_id)
+            return subprocess.CompletedProcess(command, 0, f"RUN_CAPTURED: {run_id}\n", "")
+
+        workbench, _ = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        first_result = []
+        first = Thread(
+            target=lambda: first_result.append(
+                workbench.execute_confirmed_delegation(self.execute_payload())
+            )
+        )
+        first.start()
+        self.assertTrue(started.wait(timeout=5))
+        try:
+            with self.assertRaises(WorkbenchExecutionError) as caught:
+                workbench.execute_confirmed_delegation(self.execute_payload())
+            self.assertEqual(str(caught.exception), "active_workbench_delegation_in_progress")
+        finally:
+            release.set()
+            first.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertEqual(first_result[0].run_id, run_id)
+
+    def test_http_execution_endpoint_returns_captured_run_identity_and_status(self):
+        run_id = "20260712-010203-123456"
+
+        def target_runner(command, root):
+            self.write_run_record(root, run_id, status="FAILED")
+            return subprocess.CompletedProcess(command, 1, f"RUN_FAILED: {run_id}\n", "")
+
+        workbench, _ = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/api/run",
+                data=json.dumps(self.execute_payload()).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(payload["run_id"], run_id)
+        self.assertEqual(payload["run_status"], "FAILED")
+        self.assertEqual(payload["failure_reason"], "adapter_unavailable")
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import webbrowser
+from threading import Lock
 from dataclasses import asdict, dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,7 @@ from scripts.delegation_artifact_set import (
     acceptance_check_path,
     load_task_artifact_set,
     scope_sidecar_path,
+    validate_delegation_task_file,
 )
 from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 
@@ -77,7 +79,25 @@ class WorkbenchApprovalError(ValueError):
     pass
 
 
+class WorkbenchExecutionError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class CapturedRun:
+    authority: str
+    run_id: str
+    run_status: str
+    failure_reason: str | None
+
+
+@dataclass(frozen=True)
+class ConfirmedExecution:
+    task_file: str
+
+
 IssueFetcher = Callable[[IssueReference], IssueContext]
+TargetRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 
 
 def parse_issue_reference(raw_value: str, default_repo: str | None = None) -> IssueReference:
@@ -191,10 +211,14 @@ class WorkbenchServer:
         issue_fetcher: IssueFetcher,
         default_repo: str | None = None,
         forge_root: Path | None = None,
+        target_runner: TargetRunner | None = None,
     ):
         self.issue_fetcher = issue_fetcher
         self.default_repo = default_repo
         self.forge_root = (forge_root or Path.cwd()).resolve()
+        self._target_runner = target_runner or _run_target_mode_runner
+        self._active_delegation_lock = Lock()
+        self._active_delegation = False
 
     def preview_for_issue(self, raw_reference: str) -> DraftTaskPreview:
         reference = parse_issue_reference(raw_reference, default_repo=self.default_repo)
@@ -243,6 +267,31 @@ class WorkbenchServer:
             delegation_artifact_revision=revision,
         )
 
+    def execute_confirmed_delegation(self, payload: object) -> CapturedRun:
+        execution = _parse_confirmed_execution(payload)
+        _, adapter = _approved_execution_target(self.forge_root, execution.task_file)
+        command = [
+            "bash",
+            str(self.forge_root / "scripts" / "run_agent_task.sh"),
+            "--target",
+            adapter,
+            execution.task_file,
+        ]
+
+        with self._active_delegation_lock:
+            if self._active_delegation:
+                raise WorkbenchExecutionError("active_workbench_delegation_in_progress")
+            self._active_delegation = True
+        try:
+            result = self._target_runner(command, self.forge_root)
+        except OSError as error:
+            raise WorkbenchExecutionError("target_mode_runner_start_failed") from error
+        finally:
+            with self._active_delegation_lock:
+                self._active_delegation = False
+
+        return _captured_run_from_runner_result(self.forge_root, result)
+
 
 @dataclass(frozen=True)
 class DraftApproval:
@@ -275,6 +324,66 @@ def _parse_approval(payload: object) -> DraftApproval:
         adapter=payload["adapter"],
     )
 
+
+def _parse_confirmed_execution(payload: object) -> ConfirmedExecution:
+    if not isinstance(payload, dict):
+        raise WorkbenchExecutionError("invalid_execution_request")
+    if "command" in payload:
+        raise WorkbenchExecutionError("generic_command_execution_forbidden")
+    if set(payload) != {"task_file", "confirmed"}:
+        raise WorkbenchExecutionError("invalid_execution_request")
+    if payload.get("confirmed") is not True:
+        raise WorkbenchExecutionError("operator_execution_confirmation_required")
+    task_file = payload.get("task_file")
+    if not isinstance(task_file, str):
+        raise WorkbenchExecutionError("invalid_execution_request")
+    return ConfirmedExecution(task_file=task_file)
+
+
+def _approved_execution_target(root: Path, task_file_value: str) -> tuple[Path, str]:
+    try:
+        task_path = validate_delegation_task_file(task_file_value)
+        task_file = (root / task_path).resolve()
+        task_file.relative_to(root)
+        artifact_set = load_task_artifact_set(task_file)
+    except (DelegationArtifactSetError, ValueError) as error:
+        raise WorkbenchExecutionError("invalid_approved_delegation") from error
+
+    if artifact_set.state != "delegation-ready" or not artifact_set.approved_adapter:
+        raise WorkbenchExecutionError("invalid_approved_delegation")
+    return task_file, artifact_set.approved_adapter
+
+
+def _run_target_mode_runner(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+
+
+def _captured_run_from_runner_result(
+    root: Path, result: subprocess.CompletedProcess[str]
+) -> CapturedRun:
+    output = f"{result.stdout}\n{result.stderr}"
+    match = re.search(r"^RUN_(?:CAPTURED|FAILED): ([0-9]{8}-[0-9]{6}-[0-9]+)$", output, re.MULTILINE)
+    if not match:
+        raise WorkbenchExecutionError("target_mode_runner_did_not_capture_run")
+
+    run_id = match.group(1)
+    record_path = root / "runs" / run_id / "record.json"
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise WorkbenchExecutionError("captured_run_record_unavailable") from error
+    if record.get("run_id") != run_id or record.get("run_status") not in {"COMPLETED", "FAILED"}:
+        raise WorkbenchExecutionError("captured_run_record_invalid")
+    failure_reason = record.get("failure_reason")
+    if failure_reason is not None and not isinstance(failure_reason, str):
+        raise WorkbenchExecutionError("captured_run_record_invalid")
+
+    return CapturedRun(
+        authority="captured_run",
+        run_id=run_id,
+        run_status=record["run_status"],
+        failure_reason=failure_reason,
+    )
 
 def _validate_approval(approval: DraftApproval, task_file: Path, acceptance_file: Path) -> None:
     if not approval.task_text.strip() or "\x00" in approval.task_text or "\r" in approval.task_text:
@@ -363,6 +472,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/approve":
                 self._handle_approve()
                 return
+            if parsed.path == "/api/run":
+                self._handle_run()
+                return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def _handle_draft(self, query: str) -> None:
@@ -390,6 +502,19 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
 
             self._write_json(asdict(delegation), HTTPStatus.CREATED)
+
+        def _handle_run(self) -> None:
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length < 1 or content_length > 1_000_000:
+                    raise WorkbenchExecutionError("invalid_execution_request")
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                captured_run = workbench.execute_confirmed_delegation(payload)
+            except (UnicodeDecodeError, ValueError, WorkbenchExecutionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+
+            self._write_json(asdict(captured_run), HTTPStatus.CREATED)
 
         def _write_html(self, body: str) -> None:
             encoded = body.encode("utf-8")
@@ -636,12 +761,12 @@ WORKBENCH_HTML = """<!doctype html>
       margin-top: 12px;
       overflow-wrap: anywhere;
     }
-    .approval {
+    .approval, .execution {
       border-top: 1px solid var(--line);
       margin-top: 24px;
       padding-top: 20px;
     }
-    .approval label {
+    .approval label, .execution label {
       display: flex;
       align-items: flex-start;
       font-weight: 400;
@@ -717,6 +842,12 @@ WORKBENCH_HTML = """<!doctype html>
           <button id="approve-button" type="button">Approve Delegation Artifacts</button>
           <div id="approval-result" class="approved hidden"></div>
         </div>
+        <div id="execution" class="execution hidden">
+          <div class="meta">Starting a run invokes only the approved target-mode adapter task. It captures run evidence but does not verify or promote it.</div>
+          <label for="execution-confirmation"><input id="execution-confirmation" type="checkbox">I confirm that I want to start this approved target-mode delegation now.</label>
+          <button id="run-button" type="button">Run Approved Delegation</button>
+          <div id="execution-result" class="approved hidden"></div>
+        </div>
       </div>
     </section>
   </main>
@@ -729,7 +860,12 @@ WORKBENCH_HTML = """<!doctype html>
     const approveButton = document.querySelector("#approve-button");
     const approvalConfirmation = document.querySelector("#approval-confirmation");
     const approvalResult = document.querySelector("#approval-result");
+    const execution = document.querySelector("#execution");
+    const executionConfirmation = document.querySelector("#execution-confirmation");
+    const executionResult = document.querySelector("#execution-result");
+    const runButton = document.querySelector("#run-button");
     let loadedIssue = null;
+    let approvedDelegation = null;
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -756,6 +892,10 @@ WORKBENCH_HTML = """<!doctype html>
       loadedIssue = issue;
       approvalConfirmation.checked = false;
       approvalResult.classList.add("hidden");
+      approvedDelegation = null;
+      executionConfirmation.checked = false;
+      execution.classList.add("hidden");
+      executionResult.classList.add("hidden");
       document.querySelector("#issue-title").textContent = `#${issue.number} ${issue.title}`;
       document.querySelector("#issue-url").textContent = issue.url;
       document.querySelector("#issue-body").textContent = issue.body || "";
@@ -806,11 +946,49 @@ WORKBENCH_HTML = """<!doctype html>
         }
         approvalResult.textContent = `Approved authority: ${payload.task_file}, ${payload.scope_file}, and ${payload.acceptance_file} at ${payload.delegation_artifact_revision}.`;
         approvalResult.classList.remove("hidden");
+        approvedDelegation = payload;
+        executionConfirmation.checked = false;
+        executionResult.classList.add("hidden");
+        execution.classList.remove("hidden");
       } catch (approvalError) {
         error.textContent = approvalError.message;
         error.classList.remove("hidden");
       } finally {
         approveButton.disabled = false;
+      }
+    });
+
+    runButton.addEventListener("click", async () => {
+      error.classList.add("hidden");
+      executionResult.classList.add("hidden");
+      if (!approvedDelegation) {
+        error.textContent = "missing_approved_delegation";
+        error.classList.remove("hidden");
+        return;
+      }
+
+      runButton.disabled = true;
+      try {
+        const response = await fetch("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            task_file: approvedDelegation.task_file,
+            confirmed: executionConfirmation.checked,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || "target_mode_run_failed");
+        }
+        const failure = payload.failure_reason ? ` (${payload.failure_reason})` : "";
+        executionResult.textContent = `Captured run ${payload.run_id}: ${payload.run_status}${failure}.`;
+        executionResult.classList.remove("hidden");
+      } catch (executionError) {
+        error.textContent = executionError.message;
+        error.classList.remove("hidden");
+      } finally {
+        runButton.disabled = false;
       }
     });
   </script>

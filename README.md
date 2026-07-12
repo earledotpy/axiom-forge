@@ -375,7 +375,7 @@ Local workbench draft preview:
 python scripts/workbench.py --open
 ```
 
-This starts a browser-based local workbench at `http://127.0.0.1:8765/`. Loading a GitHub Issue creates an editable draft preview for task text, target scope, acceptance check, and adapter selection. Drafts are not adapter-facing authority. The operator must explicitly approve all four fields before the workbench validates them and creates one committed Forge-owned task, scope sidecar, and acceptance check; the selected adapter is recorded in the approved task. The workbench still does not run adapters or verification, expose promotion, or create a database.
+This starts a browser-based local workbench at `http://127.0.0.1:8765/`. Loading a GitHub Issue creates an editable draft preview for task text, target scope, acceptance check, and adapter selection. Drafts are not adapter-facing authority. The operator must explicitly approve all four fields before the workbench validates them and creates one committed Forge-owned task, scope sidecar, and acceptance check; the selected adapter is recorded in the approved task. The workbench may then start one explicitly confirmed target-mode adapter run and display its captured run identity and status. It does not yet run verification, expose promotion, or create a database.
 
 Forge-local run:
 
