@@ -52,9 +52,29 @@ _Avoid_: repeated target path argument, implicit working directory target
 Captured run, verification, and promotion records stored by Axiom Forge for an external target repository run rather than committed into the target repository source tree.
 _Avoid_: target-owned run evidence, application source evidence files
 
+**Operator workbench**:
+The user-facing workflow surface where an operator turns planning source material into bounded patch tasks, delegates approved tasks to CLI adapters, inspects captured evidence, and chooses retry, review, or promotion.
+_Avoid_: orchestrator, dashboard-only UI, autonomous agent manager
+
+**Local workbench UI**:
+The first operator workbench surface: a browser-based local UI backed by Forge-owned files and the existing runner, verifier, and evidence commands. It may execute only the confirmed task-to-captured-run workflow and does not replace the fail-closed promotion gate.
+_Avoid_: terminal-only workflow, TUI, remote dashboard, generic command runner
+
+**Workbench state source**:
+The first local workbench derives state from GitHub Issues, committed Forge delegation artifacts, captured run evidence, and verification outputs rather than a separate persistent database. A later workbench version may add a database after the task-to-captured-run workflow proves what state must be stored.
+_Avoid_: Forge project database, permanent no-database rule, duplicated planning store
+
+**Task-to-captured-run workflow**:
+The first operator workbench workflow: turn planning source material into approved delegation artifacts, run a selected adapter in target mode after explicit operator confirmation, verify the captured run, and inspect the resulting evidence. It stops before promotion; promotion remains a separate gate decision.
+_Avoid_: promotion workflow, adapter qualification, autonomous implementation loop
+
+**Active workbench delegation**:
+The single task-to-captured-run workflow that the first local workbench may execute at one time. The workbench may show historical captured runs, but it does not start or manage concurrent adapter delegations in its first version.
+_Avoid_: concurrent delegation, background task queue, multi-agent scheduler
+
 **Operator evidence summary**:
-The UI-facing summary of structured evidence for a task, including task intent, approved scope, adapter, patch, verification status, review status, and promotion state. Raw adapter logs are supporting drill-down material, not the primary operator view.
-_Avoid_: terminal transcript, chat log, raw run output
+The first post-run workbench view of structured evidence for a task: task intent, approved scope, adapter, run status, changed paths, verification result, acceptance result, failure reason, and next allowed actions. Raw logs and patch diffs are supporting drill-down material, not the primary operator view.
+_Avoid_: terminal transcript, raw log view, patch-first view
 
 **Promotion review**:
 A planner or operator review of a verified patch before promotion. It is required even when the patch passes its deterministic acceptance check, because acceptance proves only the bounded task behavior.
@@ -93,12 +113,16 @@ A planner-proposed list of paths for a bounded patch task before operator approv
 _Avoid_: approved scope, implicit scope, adapter-selected scope
 
 **Planning source of truth**:
-The GitHub Issues and project docs that hold high-level plans, PRDs, and decomposed task intent. Forge reads from this source but owns only the delegation artifacts and evidence needed for patch gating.
+The GitHub Issues and project docs that hold high-level plans, PRDs, and decomposed task intent. The first operator workbench reads GitHub Issues before drafting delegation artifacts; Forge owns only the delegation artifacts and evidence needed for patch gating.
 _Avoid_: Forge project database, UI-only plan, duplicated PRD store
 
 **Planner role**:
 The authority that turns a high-level plan into bounded patch tasks for adapters. It may draft task files and task scopes, but implementation adapters do not hold this role.
 _Avoid_: implementation adapter, autonomous agent, router
+
+**Assisted task drafting**:
+The operator workbench activity that helps turn planning source material into a draft task artifact while leaving scope, acceptance, adapter selection, and delegation approval under operator control.
+_Avoid_: automatic task generation, silent delegation, autonomous planning
 
 **Planner conversation**:
 The UI-supported conversational workflow for a planner role, separated into task-drafting mode and promotion-review mode. It is distinct from delegated adapter interaction, which is non-chat implementation through approved tasks and captured results.
@@ -109,8 +133,8 @@ A deterministic acceptance check drafted for a bounded patch task and accepted b
 _Avoid_: planner-only check, adapter-selected check, manual review
 
 **Operator-directed retry**:
-A deliberate planner or operator choice to rerun a delegation-ready task after a failed captured run. Forge records the failure as evidence but does not automatically reroute the task to another adapter.
-_Avoid_: automatic fallback, quota router, silent retry
+A deliberate planner or operator choice to rerun a delegation-ready task after a failed captured run, optionally with a different adapter. The workbench may present retry choices and availability hints, but Forge records the failure as evidence and does not automatically reroute the task.
+_Avoid_: automatic fallback, quota router, silent retry, autonomous failover
 
 **Adapter availability failure**:
 A failed captured run whose failure reason indicates the selected adapter was unavailable or out of quota before implementation correctness could be judged. It remains run evidence, but it is distinct from unsafe behavior or task-incorrect implementation.
@@ -165,8 +189,8 @@ A registered adapter granted `standard` status and trust after documented adapte
 _Avoid_: promoted adapter, experimental adapter
 
 **Adapter qualification**:
-The required evidence for registering an adapter: three consecutive, independent, successful, in-scope captured runs, each satisfying the full adapter-safety contract, producing a verified patch, capturing a complete adapter configuration, and passing a deterministic task-specific acceptance test. A failed, unsafe, incompletely identified, or task-incorrect run resets the qualification series; manual assertions do not substitute for captured identity evidence.
-_Avoid_: smoke test, one-off success
+Supporting evidence for deciding whether a registered adapter configuration may receive standard trust. It is not the main operator workbench workflow; day-to-day implementation work uses delegation, captured runs, review, retry, and promotion decisions.
+_Avoid_: main product loop, smoke test, one-off success
 
 **Task-specific acceptance test**:
 A deterministic, operator-controlled check that establishes whether one qualification task's requested behavior was implemented. It is kept outside the agent worktree and run after applying the captured patch in a fresh verifier worktree; it is distinct from the general project verification command.
