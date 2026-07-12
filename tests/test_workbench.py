@@ -14,6 +14,7 @@ from app.workbench import (
     IssueReference,
     WorkbenchApprovalError,
     WorkbenchExecutionError,
+    WorkbenchVerificationError,
     WorkbenchServer,
     issue_to_draft_preview,
     make_handler,
@@ -34,7 +35,7 @@ FIXTURE_ISSUE = IssueContext(
 
 
 class TestWorkbench(unittest.TestCase):
-    def make_workbench(self, target_runner=None) -> tuple[WorkbenchServer, Path]:
+    def make_workbench(self, target_runner=None, verification_runner=None) -> tuple[WorkbenchServer, Path]:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         root = Path(temporary_directory.name)
@@ -48,6 +49,7 @@ class TestWorkbench(unittest.TestCase):
             lambda reference: FIXTURE_ISSUE,
             forge_root=root,
             target_runner=target_runner,
+            verification_runner=verification_runner,
         ), root
 
     def approval_payload(self, **overrides):
@@ -81,6 +83,27 @@ class TestWorkbench(unittest.TestCase):
         if status == 'FAILED':
             record['failure_reason'] = 'adapter_unavailable'
         (run_dir / 'record.json').write_text(json.dumps(record), encoding='utf-8')
+
+    @staticmethod
+    def write_target_run_evidence(root: Path, run_id: str, record: dict | None = None) -> Path:
+        run_dir = root / 'runs' / run_id
+        run_dir.mkdir(parents=True)
+        run_dir.joinpath('record.json').write_text(
+            json.dumps(record or {'run_id': run_id, 'run_status': 'COMPLETED', 'failure_reason': None, 'agent': 'codex', 'run_mode': 'target'}),
+            encoding='utf-8',
+        )
+        run_dir.joinpath('task.md').write_text('Implement the target widget.\n', encoding='utf-8')
+        run_dir.joinpath('allowed-paths.txt').write_text('app/widget.py\n', encoding='utf-8')
+        run_dir.joinpath('patch.diff').write_text(
+            'diff --git a/app/widget.py b/app/widget.py\n'
+            'index 1111111..2222222 100644\n'
+            '--- a/app/widget.py\n'
+            '+++ b/app/widget.py\n',
+            encoding='utf-8',
+        )
+        run_dir.joinpath('stdout.log').write_text('adapter stdout\n', encoding='utf-8')
+        run_dir.joinpath('stderr.log').write_text('adapter stderr\n', encoding='utf-8')
+        return run_dir
 
     def test_parse_issue_reference_accepts_number_hash_and_url(self):
         self.assertEqual(parse_issue_reference("49", "owner/repo"), IssueReference(49, "owner/repo"))
@@ -363,5 +386,147 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(payload["run_status"], "FAILED")
         self.assertEqual(payload["failure_reason"], "adapter_unavailable")
 
+    def test_target_verification_returns_evidence_first_summary_for_a_passing_run(self):
+        run_id = '20260712-010203-123456'
+
+        def verification_runner(command, root):
+            self.assertEqual(command, ['bash', str(root / 'scripts' / 'verify_patch.sh'), '--target', f'runs/{run_id}'])
+            (root / 'runs' / run_id / 'verify.json').write_text(
+                json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+            )
+            return subprocess.CompletedProcess(command, 0, f'VERIFY_PATCH: PASS {run_id}\n', '')
+
+        workbench, root = self.make_workbench(verification_runner=verification_runner)
+        self.write_target_run_evidence(root, run_id)
+
+        summary = workbench.verify_captured_run({'run_id': run_id})
+
+        self.assertEqual(summary.run_id, run_id)
+        self.assertEqual(summary.task_intent, 'Implement the target widget.')
+        self.assertEqual(summary.approved_scope, ['app/widget.py'])
+        self.assertEqual(summary.adapter, 'codex')
+        self.assertEqual(summary.run_status, 'COMPLETED')
+        self.assertEqual(summary.changed_paths, ['app/widget.py'])
+        self.assertEqual(summary.verification_result, 'PASS')
+        self.assertEqual(summary.acceptance_result, 'PASS')
+        self.assertIsNone(summary.failure_reason)
+        self.assertEqual(summary.next_allowed_actions, ['inspect_details', 'prepare_review'])
+
+    def test_summary_prefers_the_approved_task_intent_section(self):
+        run_id = '20260712-010203-123456'
+        workbench, root = self.make_workbench()
+        run_dir = self.write_target_run_evidence(root, run_id)
+        run_dir.joinpath('task.md').write_text(
+            'Implement Issue #52.\n\nTask intent:\nShow verified evidence to the operator.\n\nConstraints:\n- No promotion.\n',
+            encoding='utf-8',
+        )
+
+        summary = workbench.summary_for_captured_run(run_id)
+
+        self.assertEqual(summary.task_intent, 'Show verified evidence to the operator.')
+    def test_target_verification_summarizes_a_failed_verification(self):
+        run_id = '20260712-010203-123456'
+
+        def verification_runner(command, root):
+            (root / 'runs' / run_id / 'verify.json').write_text(
+                json.dumps({'status': 'FAIL', 'reason': 'target_acceptance_failed', 'acceptance': {'returncode': 1}}), encoding='utf-8'
+            )
+            return subprocess.CompletedProcess(command, 1, '', 'ERROR: verification_failed\n')
+
+        workbench, root = self.make_workbench(verification_runner=verification_runner)
+        self.write_target_run_evidence(root, run_id)
+
+        summary = workbench.verify_captured_run({'run_id': run_id})
+
+        self.assertEqual(summary.verification_result, 'FAIL')
+        self.assertEqual(summary.verification_reason, 'target_acceptance_failed')
+        self.assertEqual(summary.acceptance_result, 'FAIL')
+        self.assertEqual(summary.next_allowed_actions, ['inspect_details', 'retry_later'])
+
+    def test_failed_run_record_remains_visible_without_running_verification(self):
+        run_id = '20260712-010203-123456'
+        calls = []
+        workbench, root = self.make_workbench(verification_runner=lambda command, root: calls.append(command))
+        self.write_target_run_evidence(
+            root,
+            run_id,
+            {'run_id': run_id, 'run_status': 'FAILED', 'failure_reason': 'adapter_unavailable', 'agent': 'codex', 'run_mode': 'target'},
+        )
+
+        summary = workbench.summary_for_captured_run(run_id)
+
+        self.assertEqual(summary.run_status, 'FAILED')
+        self.assertEqual(summary.failure_reason, 'adapter_unavailable')
+        self.assertEqual(summary.verification_result, 'NOT_RUN')
+        self.assertEqual(summary.next_allowed_actions, ['inspect_details', 'retry_later'])
+        self.assertEqual(calls, [])
+
+    def test_summary_handles_missing_evidence_fields_without_hiding_the_run(self):
+        run_id = '20260712-010203-123456'
+        workbench, root = self.make_workbench()
+        run_dir = root / 'runs' / run_id
+        run_dir.mkdir(parents=True)
+        run_dir.joinpath('record.json').write_text(json.dumps({'run_id': run_id, 'run_status': 'COMPLETED'}), encoding='utf-8')
+
+        summary = workbench.summary_for_captured_run(run_id)
+
+        self.assertEqual(summary.task_intent, 'missing_task_intent')
+        self.assertEqual(summary.approved_scope, [])
+        self.assertEqual(summary.adapter, 'missing_adapter')
+        self.assertEqual(summary.changed_paths, [])
+        self.assertEqual(summary.verification_result, 'NOT_RUN')
+        self.assertEqual(summary.acceptance_result, 'NOT_RUN')
+
+    def test_verification_rejects_an_invalid_run_request_without_starting_a_runner(self):
+        calls = []
+        workbench, _ = self.make_workbench(verification_runner=lambda command, root: calls.append(command))
+
+        with self.assertRaises(WorkbenchVerificationError) as caught:
+            workbench.verify_captured_run({'run_id': '../not-a-run'})
+
+        self.assertEqual(str(caught.exception), 'invalid_captured_run_reference')
+        self.assertEqual(calls, [])
+
+    def test_workbench_html_renders_the_required_summary_fields_and_drill_down(self):
+        from app.workbench import WORKBENCH_HTML
+
+        for field in (
+            'Task intent',
+            'Approved scope',
+            'Adapter',
+            'Run status',
+            'Changed paths',
+            'Verification',
+            'Acceptance',
+            'Failure reason',
+            'Next allowed actions',
+            'Raw stdout, stderr, and patch diff',
+        ):
+            self.assertIn(field, WORKBENCH_HTML)
+        self.assertIn('renderEvidenceSummary', WORKBENCH_HTML)
+        self.assertIn('/api/runs/${runId}/details', WORKBENCH_HTML)
+    def test_http_summary_keeps_raw_evidence_in_the_drill_down_endpoint(self):
+        run_id = '20260712-010203-123456'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, run_id)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}") as response:
+                summary = json.loads(response.read().decode("utf-8"))
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}/details") as response:
+                details = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(summary['authority'], 'operator_evidence_summary')
+        self.assertEqual(summary['changed_paths'], ['app/widget.py'])
+        self.assertNotIn('stdout', summary)
+        self.assertEqual(details['stdout'], 'adapter stdout\n')
+        self.assertEqual(details['stderr'], 'adapter stderr\n')
+        self.assertIn('diff --git', details['patch_diff'])
 if __name__ == "__main__":
     unittest.main()

@@ -83,6 +83,33 @@ class WorkbenchExecutionError(ValueError):
     pass
 
 
+class WorkbenchVerificationError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class OperatorEvidenceSummary:
+    authority: str
+    run_id: str
+    task_intent: str
+    approved_scope: list[str]
+    adapter: str
+    run_status: str
+    changed_paths: list[str]
+    verification_result: str
+    verification_reason: str | None
+    acceptance_result: str
+    failure_reason: str | None
+    next_allowed_actions: list[str]
+
+
+@dataclass(frozen=True)
+class OperatorEvidenceDetails:
+    run_id: str
+    stdout: str
+    stderr: str
+    patch_diff: str
+
 @dataclass(frozen=True)
 class CapturedRun:
     authority: str
@@ -96,6 +123,7 @@ class ConfirmedExecution:
     task_file: str
 
 
+VerificationRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 IssueFetcher = Callable[[IssueReference], IssueContext]
 TargetRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 
@@ -212,11 +240,13 @@ class WorkbenchServer:
         default_repo: str | None = None,
         forge_root: Path | None = None,
         target_runner: TargetRunner | None = None,
+        verification_runner: VerificationRunner | None = None,
     ):
         self.issue_fetcher = issue_fetcher
         self.default_repo = default_repo
         self.forge_root = (forge_root or Path.cwd()).resolve()
         self._target_runner = target_runner or _run_target_mode_runner
+        self._verification_runner = verification_runner or _run_target_mode_verifier
         self._active_delegation_lock = Lock()
         self._active_delegation = False
 
@@ -292,6 +322,36 @@ class WorkbenchServer:
 
         return _captured_run_from_runner_result(self.forge_root, result)
 
+
+    def verify_captured_run(self, payload: object) -> OperatorEvidenceSummary:
+        run_id = _parse_verification_request(payload)
+        run_dir = _captured_run_directory(self.forge_root, run_id)
+        command = [
+            "bash",
+            str(self.forge_root / "scripts" / "verify_patch.sh"),
+            "--target",
+            run_dir.relative_to(self.forge_root).as_posix(),
+        ]
+        try:
+            result = self._verification_runner(command, self.forge_root)
+        except OSError as error:
+            raise WorkbenchVerificationError("target_mode_verifier_start_failed") from error
+        return _operator_evidence_summary(
+            run_dir,
+            verification_failure_reason=_verification_failure_reason(result),
+        )
+
+    def summary_for_captured_run(self, run_id: str) -> OperatorEvidenceSummary:
+        return _operator_evidence_summary(_captured_run_directory(self.forge_root, run_id))
+
+    def evidence_details_for_captured_run(self, run_id: str) -> OperatorEvidenceDetails:
+        run_dir = _captured_run_directory(self.forge_root, run_id)
+        return OperatorEvidenceDetails(
+            run_id=run_id,
+            stdout=_evidence_text(run_dir / "stdout.log"),
+            stderr=_evidence_text(run_dir / "stderr.log"),
+            patch_diff=_evidence_text(run_dir / "patch.diff"),
+        )
 
 @dataclass(frozen=True)
 class DraftApproval:
@@ -385,6 +445,152 @@ def _captured_run_from_runner_result(
         failure_reason=failure_reason,
     )
 
+def _parse_verification_request(payload: object) -> str:
+    if not isinstance(payload, dict) or set(payload) != {"run_id"}:
+        raise WorkbenchVerificationError("invalid_verification_request")
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise WorkbenchVerificationError("invalid_captured_run_reference")
+    return run_id
+
+
+def _is_captured_run_id(run_id: str) -> bool:
+    return re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]+", run_id) is not None
+
+
+def _captured_run_directory(root: Path, run_id: str) -> Path:
+    if not _is_captured_run_id(run_id):
+        raise WorkbenchVerificationError("invalid_captured_run_reference")
+    run_dir = root / "runs" / run_id
+    try:
+        run_dir.resolve().relative_to((root / "runs").resolve())
+    except ValueError as error:
+        raise WorkbenchVerificationError("invalid_captured_run_reference") from error
+    if not run_dir.is_dir():
+        raise WorkbenchVerificationError("captured_run_not_found")
+    return run_dir
+
+
+def _run_target_mode_verifier(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+
+
+def _operator_evidence_summary(
+    run_dir: Path, verification_failure_reason: str | None = None
+) -> OperatorEvidenceSummary:
+    try:
+        record = json.loads((run_dir / "record.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise WorkbenchVerificationError("captured_run_record_unavailable") from error
+    if not isinstance(record, dict) or record.get("run_id") != run_dir.name:
+        raise WorkbenchVerificationError("captured_run_record_invalid")
+
+    run_status = record.get("run_status")
+    if not isinstance(run_status, str):
+        run_status = "missing_run_status"
+    failure_reason = record.get("failure_reason")
+    if not isinstance(failure_reason, str):
+        failure_reason = None
+    verification_result, verification_reason, acceptance_result = _verification_summary(
+        run_dir, verification_failure_reason
+    )
+    return OperatorEvidenceSummary(
+        authority="operator_evidence_summary",
+        run_id=run_dir.name,
+        task_intent=_task_intent_from_evidence(run_dir),
+        approved_scope=_scope_from_evidence(run_dir),
+        adapter=record.get("agent") if isinstance(record.get("agent"), str) else "missing_adapter",
+        run_status=run_status,
+        changed_paths=_changed_paths_from_evidence(run_dir),
+        verification_result=verification_result,
+        verification_reason=verification_reason,
+        acceptance_result=acceptance_result,
+        failure_reason=failure_reason,
+        next_allowed_actions=_next_allowed_actions(run_status, verification_result),
+    )
+
+
+def _verification_summary(
+    run_dir: Path, verification_failure_reason: str | None
+) -> tuple[str, str | None, str]:
+    verify_path = run_dir / "verify.json"
+    if not verify_path.is_file():
+        if verification_failure_reason is None:
+            return "NOT_RUN", None, "NOT_RUN"
+        return "FAIL", verification_failure_reason, "NOT_RUN"
+    try:
+        verify = json.loads(verify_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "FAIL", "invalid_verification_evidence", "NOT_RUN"
+    if not isinstance(verify, dict):
+        return "FAIL", "invalid_verification_evidence", "NOT_RUN"
+    status = "PASS" if verify.get("status") == "PASS" else "FAIL"
+    reason = verify.get("reason") if isinstance(verify.get("reason"), str) else verification_failure_reason
+    acceptance = verify.get("acceptance")
+    if not isinstance(acceptance, dict) or not isinstance(acceptance.get("returncode"), int):
+        acceptance_result = "NOT_RUN"
+    else:
+        acceptance_result = "PASS" if acceptance["returncode"] == 0 else "FAIL"
+    return status, reason, acceptance_result
+
+
+def _task_intent_from_evidence(run_dir: Path) -> str:
+    task_lines = _evidence_text(run_dir / "task.md").splitlines()
+    for index, line in enumerate(task_lines):
+        if line.strip() == "Task intent:":
+            intent_lines = []
+            for intent_line in task_lines[index + 1:]:
+                if intent_line.strip() == "Constraints:":
+                    break
+                intent_lines.append(intent_line)
+            task_intent = "\n".join(intent_lines).strip()
+            if task_intent:
+                return task_intent
+    for line in task_lines:
+        if line.strip() and not line.lstrip().startswith("<!--"):
+            return line.strip()
+    return "missing_task_intent"
+
+def _scope_from_evidence(run_dir: Path) -> list[str]:
+    return [
+        line.strip()
+        for line in _evidence_text(run_dir / "allowed-paths.txt").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _changed_paths_from_evidence(run_dir: Path) -> list[str]:
+    paths: list[str] = []
+    for line in _evidence_text(run_dir / "patch.diff").splitlines():
+        match = re.match(r"diff --git a/(.+) b/(.+)$", line)
+        if match and match.group(2) not in paths:
+            paths.append(match.group(2))
+    return paths
+
+
+def _evidence_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _verification_failure_reason(result: subprocess.CompletedProcess[str]) -> str | None:
+    if result.returncode == 0:
+        return None
+    output = f"{result.stdout}\n{result.stderr}"
+    match = re.search(r"(?:Reason:|ERROR:)\s*([^\s]+)", output)
+    return match.group(1) if match else "target_verification_failed"
+
+
+def _next_allowed_actions(run_status: str, verification_result: str) -> list[str]:
+    if run_status == "FAILED":
+        return ["inspect_details", "retry_later"]
+    if verification_result == "PASS":
+        return ["inspect_details", "prepare_review"]
+    if verification_result == "FAIL":
+        return ["inspect_details", "retry_later"]
+    return ["verify", "inspect_details"]
 def _validate_approval(approval: DraftApproval, task_file: Path, acceptance_file: Path) -> None:
     if not approval.task_text.strip() or "\x00" in approval.task_text or "\r" in approval.task_text:
         raise WorkbenchApprovalError("invalid_approved_task_text")
@@ -465,6 +671,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/draft":
                 self._handle_draft(parsed.query)
                 return
+            if parsed.path.startswith("/api/runs/"):
+                self._handle_summary(parsed.path)
+                return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
@@ -474,6 +683,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/api/run":
                 self._handle_run()
+                return
+            if parsed.path == "/api/verify":
+                self._handle_verify()
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -516,6 +728,32 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
 
             self._write_json(asdict(captured_run), HTTPStatus.CREATED)
 
+        def _handle_summary(self, path: str) -> None:
+            match = re.fullmatch(r"/api/runs/([0-9]{8}-[0-9]{6}-[0-9]+)(/details)?", path)
+            if not match:
+                self._write_json({"error": "invalid_captured_run_reference"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                if match.group(2):
+                    payload = asdict(workbench.evidence_details_for_captured_run(match.group(1)))
+                else:
+                    payload = asdict(workbench.summary_for_captured_run(match.group(1)))
+            except WorkbenchVerificationError as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(payload)
+
+        def _handle_verify(self) -> None:
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if content_length < 1 or content_length > 1_000_000:
+                    raise WorkbenchVerificationError("invalid_verification_request")
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                summary = workbench.verify_captured_run(payload)
+            except (UnicodeDecodeError, ValueError, WorkbenchVerificationError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(asdict(summary), HTTPStatus.CREATED)
         def _write_html(self, body: str) -> None:
             encoded = body.encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -847,6 +1085,7 @@ WORKBENCH_HTML = """<!doctype html>
           <label for="execution-confirmation"><input id="execution-confirmation" type="checkbox">I confirm that I want to start this approved target-mode delegation now.</label>
           <button id="run-button" type="button">Run Approved Delegation</button>
           <div id="execution-result" class="approved hidden"></div>
+          <div id="evidence-summary" class="hidden"></div>
         </div>
       </div>
     </section>
@@ -864,6 +1103,7 @@ WORKBENCH_HTML = """<!doctype html>
     const executionConfirmation = document.querySelector("#execution-confirmation");
     const executionResult = document.querySelector("#execution-result");
     const runButton = document.querySelector("#run-button");
+    const evidenceSummary = document.querySelector("#evidence-summary");
     let loadedIssue = null;
     let approvedDelegation = null;
 
@@ -984,6 +1224,7 @@ WORKBENCH_HTML = """<!doctype html>
         const failure = payload.failure_reason ? ` (${payload.failure_reason})` : "";
         executionResult.textContent = `Captured run ${payload.run_id}: ${payload.run_status}${failure}.`;
         executionResult.classList.remove("hidden");
+        await renderEvidenceSummary(payload.run_id);
       } catch (executionError) {
         error.textContent = executionError.message;
         error.classList.remove("hidden");
@@ -991,6 +1232,76 @@ WORKBENCH_HTML = """<!doctype html>
         runButton.disabled = false;
       }
     });
+    async function renderEvidenceSummary(runId, verify = false) {
+      const response = await fetch(verify ? "/api/verify" : `/api/runs/${runId}`, {
+        method: verify ? "POST" : "GET",
+        headers: verify ? { "Content-Type": "application/json" } : undefined,
+        body: verify ? JSON.stringify({ run_id: runId }) : undefined,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "evidence_summary_failed");
+      }
+      evidenceSummary.replaceChildren();
+      const heading = document.createElement("h3");
+      heading.textContent = `Operator evidence summary: ${payload.run_id}`;
+      evidenceSummary.append(heading);
+      const fields = [
+        ["Task intent", payload.task_intent],
+        ["Approved scope", (payload.approved_scope || []).join(", ") || "missing"],
+        ["Adapter", payload.adapter],
+        ["Run status", payload.run_status],
+        ["Changed paths", (payload.changed_paths || []).join(", ") || "none"],
+        ["Verification", payload.verification_result],
+        ["Acceptance", payload.acceptance_result],
+        ["Failure reason", payload.failure_reason || payload.verification_reason || "none"],
+        ["Next allowed actions", (payload.next_allowed_actions || []).join(", ")],
+      ];
+      const list = document.createElement("dl");
+      fields.forEach(([label, value]) => {
+        const term = document.createElement("dt");
+        term.textContent = label;
+        const detail = document.createElement("dd");
+        detail.textContent = value;
+        list.append(term, detail);
+      });
+      evidenceSummary.append(list);
+      if (payload.verification_result === "NOT_RUN" && payload.run_status === "COMPLETED") {
+        const verifyButton = document.createElement("button");
+        verifyButton.type = "button";
+        verifyButton.textContent = "Verify Captured Run";
+        verifyButton.addEventListener("click", async () => {
+          verifyButton.disabled = true;
+          try {
+            await renderEvidenceSummary(runId, true);
+          } catch (verificationError) {
+            error.textContent = verificationError.message;
+            error.classList.remove("hidden");
+          }
+        });
+        evidenceSummary.append(verifyButton);
+      }
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Raw stdout, stderr, and patch diff";
+      details.append(summary);
+      details.addEventListener("toggle", async () => {
+        if (!details.open || details.dataset.loaded) return;
+        const detailResponse = await fetch(`/api/runs/${runId}/details`);
+        const raw = await detailResponse.json();
+        if (!detailResponse.ok) return;
+        [["stdout", raw.stdout], ["stderr", raw.stderr], ["patch diff", raw.patch_diff]].forEach(([label, text]) => {
+          const title = document.createElement("h4");
+          title.textContent = label;
+          const pre = document.createElement("pre");
+          pre.textContent = text || "missing";
+          details.append(title, pre);
+        });
+        details.dataset.loaded = "true";
+      });
+      evidenceSummary.append(details);
+      evidenceSummary.classList.remove("hidden");
+    }
   </script>
 </body>
 </html>
