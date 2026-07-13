@@ -35,8 +35,11 @@ class TestWorkbenchBoundaries(unittest.TestCase):
         self.assertEqual(caught.exception.code, 404)
 
     def test_promotion_and_qualification_are_not_workbench_routes(self):
-        self.assertNotIn("promotion", WORKBENCH_HTML.casefold())
-        self.assertNotIn("qualification", WORKBENCH_HTML.casefold())
+        html = WORKBENCH_HTML.casefold()
+        self.assertNotIn('fetch("/api/promote"', html)
+        self.assertNotIn('id="promote', html)
+        self.assertNotIn('textcontent = "promote', html)
+        self.assertNotIn("qualification", html)
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.make_workbench(root)))

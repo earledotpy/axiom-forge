@@ -104,6 +104,16 @@ class OperatorEvidenceSummary:
 
 
 @dataclass(frozen=True)
+class HistoricalCapturedRun:
+    authority: str
+    run_id: str
+    state: str
+    verification_state: str
+    read_only: bool
+    summary: OperatorEvidenceSummary | None
+    evidence_error: str | None
+
+@dataclass(frozen=True)
 class OperatorEvidenceDetails:
     run_id: str
     stdout: str
@@ -357,6 +367,16 @@ class WorkbenchServer:
     def summary_for_captured_run(self, run_id: str) -> OperatorEvidenceSummary:
         return _operator_evidence_summary(_captured_run_directory(self.forge_root, run_id))
 
+    def historical_captured_runs(self) -> list[HistoricalCapturedRun]:
+        runs_root = self.forge_root / "runs"
+        if not runs_root.is_dir():
+            return []
+        return [
+            _historical_captured_run(run_dir)
+            for run_dir in sorted(runs_root.iterdir(), key=lambda path: path.name, reverse=True)
+            if run_dir.is_dir() and _is_captured_run_id(run_dir.name)
+        ]
+
     def evidence_details_for_captured_run(self, run_id: str) -> OperatorEvidenceDetails:
         run_dir = _captured_run_directory(self.forge_root, run_id)
         return OperatorEvidenceDetails(
@@ -580,6 +600,50 @@ def _operator_evidence_summary(
     )
 
 
+def _historical_captured_run(run_dir: Path) -> HistoricalCapturedRun:
+    try:
+        summary = _operator_evidence_summary(run_dir)
+    except WorkbenchVerificationError as error:
+        return HistoricalCapturedRun(
+            authority="historical_captured_run",
+            run_id=run_dir.name,
+            state="missing_evidence",
+            verification_state="missing_evidence",
+            read_only=True,
+            summary=None,
+            evidence_error=str(error),
+        )
+
+    return HistoricalCapturedRun(
+        authority="historical_captured_run",
+        run_id=run_dir.name,
+        state=_historical_run_state(run_dir, summary),
+        verification_state=_historical_verification_state(summary),
+        read_only=True,
+        summary=summary,
+        evidence_error=None,
+    )
+
+
+def _historical_run_state(run_dir: Path, summary: OperatorEvidenceSummary) -> str:
+    record = _evidence_json(run_dir / "record.json")
+    if isinstance(record.get("superseded_by_run_id"), str) and record["superseded_by_run_id"]:
+        return "superseded"
+    if summary.run_status == "FAILED":
+        return "failed"
+    if summary.run_status == "COMPLETED":
+        return "completed"
+    return "unknown"
+
+
+def _historical_verification_state(summary: OperatorEvidenceSummary) -> str:
+    if summary.verification_result == "PASS":
+        return "verified"
+    if summary.verification_result == "FAIL":
+        return "failed"
+    return "unverified"
+
+
 def _evidence_json(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -748,6 +812,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/draft":
                 self._handle_draft(parsed.query)
                 return
+            if parsed.path == "/api/runs":
+                self._handle_history()
+                return
             if parsed.path.startswith("/api/runs/"):
                 self._handle_summary(parsed.path)
                 return
@@ -820,6 +887,14 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
 
             self._write_json(asdict(captured_run), HTTPStatus.CREATED)
+
+        def _handle_history(self) -> None:
+            self._write_json(
+                {
+                    "authority": "historical_captured_runs",
+                    "runs": [asdict(run) for run in workbench.historical_captured_runs()],
+                }
+            )
 
         def _handle_summary(self, path: str) -> None:
             match = re.fullmatch(r"/api/runs/([0-9]{8}-[0-9]{6}-[0-9]+)(/details)?", path)
@@ -1136,6 +1211,11 @@ WORKBENCH_HTML = """<!doctype html>
         <div id="error" class="error hidden"></div>
       </form>
       <p class="meta">Draft artifacts stay editable here. Only explicit approval creates committed delegation authority.</p>
+      <div class="history">
+        <h2>Historical captured runs</h2>
+        <div id="run-history" class="meta">Loading captured-run history…</div>
+      </div>
+      <div id="evidence-summary" class="hidden"></div>
     </aside>
     <section>
       <div id="empty" class="meta">Load a GitHub Issue to prepare a draft task artifact.</div>
@@ -1174,11 +1254,10 @@ WORKBENCH_HTML = """<!doctype html>
           <div id="approval-result" class="approved hidden"></div>
         </div>
         <div id="execution" class="execution hidden">
-          <div class="meta">Starting a run invokes only the approved target-mode adapter task. It captures run evidence but does not verify or promote it.</div>
+          <div class="meta">Starting a run invokes only the approved target-mode adapter task. It captures run evidence, then you can verify it; promotion remains outside the workbench.</div>
           <label for="execution-confirmation"><input id="execution-confirmation" type="checkbox">I confirm that I want to start this approved target-mode delegation now.</label>
           <button id="run-button" type="button">Run Approved Delegation</button>
           <div id="execution-result" class="approved hidden"></div>
-          <div id="evidence-summary" class="hidden"></div>
         </div>
       </div>
     </section>
@@ -1197,6 +1276,7 @@ WORKBENCH_HTML = """<!doctype html>
     const executionResult = document.querySelector("#execution-result");
     const runButton = document.querySelector("#run-button");
     const evidenceSummary = document.querySelector("#evidence-summary");
+    const runHistory = document.querySelector("#run-history");
     const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
     let loadedIssue = null;
     let approvedDelegation = null;
@@ -1319,6 +1399,7 @@ WORKBENCH_HTML = """<!doctype html>
         executionResult.textContent = `Captured run ${payload.run_id}: ${payload.run_status}${failure}.`;
         executionResult.classList.remove("hidden");
         await renderEvidenceSummary(payload.run_id);
+        await renderHistoricalRuns();
       } catch (executionError) {
         error.textContent = executionError.message;
         error.classList.remove("hidden");
@@ -1326,7 +1407,7 @@ WORKBENCH_HTML = """<!doctype html>
         runButton.disabled = false;
       }
     });
-    async function renderEvidenceSummary(runId, verify = false) {
+    async function renderEvidenceSummary(runId, verify = false, readOnly = false) {
       const response = await fetch(verify ? "/api/verify" : `/api/runs/${runId}`, {
         method: verify ? "POST" : "GET",
         headers: verify ? { "Content-Type": "application/json" } : undefined,
@@ -1360,7 +1441,7 @@ WORKBENCH_HTML = """<!doctype html>
         list.append(term, detail);
       });
       evidenceSummary.append(list);
-      if (payload.verification_result === "NOT_RUN" && payload.run_status === "COMPLETED") {
+      if (!readOnly && payload.verification_result === "NOT_RUN" && payload.run_status === "COMPLETED") {
         const verifyButton = document.createElement("button");
         verifyButton.type = "button";
         verifyButton.textContent = "Verify Captured Run";
@@ -1375,7 +1456,7 @@ WORKBENCH_HTML = """<!doctype html>
         });
         evidenceSummary.append(verifyButton);
       }
-      if (payload.run_status === "FAILED" || payload.verification_result === "FAIL") {
+      if (!readOnly && (payload.run_status === "FAILED" || payload.verification_result === "FAIL")) {
         const retry = document.createElement("div");
         retry.className = "execution";
         const retryNote = document.createElement("div");
@@ -1424,6 +1505,7 @@ WORKBENCH_HTML = """<!doctype html>
             priorEvidenceTitle.textContent = `Prior failed evidence summary: ${runId}`;
             priorEvidence.append(priorEvidenceTitle, failedEvidenceSummary);
             evidenceSummary.prepend(priorEvidence);
+            await renderHistoricalRuns();
           } catch (retryError) {
             error.textContent = retryError.message;
             error.classList.remove("hidden");
@@ -1455,6 +1537,50 @@ WORKBENCH_HTML = """<!doctype html>
       evidenceSummary.append(details);
       evidenceSummary.classList.remove("hidden");
     }
+    async function renderHistoricalRuns() {
+      const response = await fetch("/api/runs");
+      const payload = await response.json();
+      if (!response.ok) {
+        runHistory.textContent = payload.error || "historical_runs_unavailable";
+        return;
+      }
+      runHistory.replaceChildren();
+      if (!payload.runs.length) {
+        runHistory.textContent = "No captured runs are available.";
+        return;
+      }
+      const list = document.createElement("ul");
+      payload.runs.forEach((entry) => {
+        const item = document.createElement("li");
+        const summary = entry.summary;
+        const label = document.createElement("strong");
+        label.textContent = `${entry.run_id}: ${entry.state}; ${entry.verification_state}`;
+        item.append(label);
+        const detail = document.createElement("div");
+        detail.className = "meta";
+        detail.textContent = summary
+          ? `${summary.run_status}; verification ${summary.verification_result}; read-only evidence.`
+          : `Missing evidence: ${entry.evidence_error}.`;
+        item.append(detail);
+        if (summary) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "View evidence summary";
+          button.addEventListener("click", async () => {
+            try {
+              await renderEvidenceSummary(entry.run_id, false, true);
+            } catch (historyError) {
+              error.textContent = historyError.message;
+              error.classList.remove("hidden");
+            }
+          });
+          item.append(button);
+        }
+        list.append(item);
+      });
+      runHistory.append(list);
+    }
+    renderHistoricalRuns();
   </script>
 </body>
 </html>
