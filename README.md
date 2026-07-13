@@ -375,7 +375,7 @@ Local workbench draft preview:
 python scripts/workbench.py --open
 ```
 
-This starts a browser-based local workbench at `http://127.0.0.1:8765/`. Loading a GitHub Issue creates an editable draft preview for task text, target scope, acceptance check, and adapter selection. Drafts are not adapter-facing authority. The operator must explicitly approve all four fields before the workbench validates them and creates one committed Forge-owned task, scope sidecar, and acceptance check; the selected adapter is recorded in the approved task. The workbench may then start one explicitly confirmed target-mode adapter run and display its captured run identity and status. It does not yet run verification, expose promotion, or create a database.
+This starts a browser-based local workbench at `http://127.0.0.1:8765/`. Loading a GitHub Issue creates an editable draft preview for task text, target scope, acceptance check, and adapter selection. Drafts are not adapter-facing authority. The operator must explicitly approve all four fields before the workbench validates them and creates one committed Forge-owned task, scope sidecar, and acceptance check; the selected adapter is recorded in the approved task. The workbench may then start one explicitly confirmed target-mode adapter run, verify a captured run, and display its evidence summary. It permits only one active delegation, never exposes promotion, generic command execution, or adapter qualification, and creates no persistent database. A retry is an explicit operator-confirmed new run from the recorded approved delegation; it is never automatic.
 
 Forge-local run:
 
@@ -433,7 +433,7 @@ bash tests/promote/run_all.sh
 bash tests/runner/run_all.sh
 bash tests/target_verify/run_all.sh
 bash tests/target_operator_loop/run_all.sh
-python -m unittest tests.test_operator_evidence
+python -B -m unittest tests.test_operator_evidence tests.test_workbench tests.test_workbench_boundaries
 bash tests/compatibility/run_all.sh
 bash tests/adapter_evaluation/run_all.sh
 bash tests/qualification/run_all.sh
