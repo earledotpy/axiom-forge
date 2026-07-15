@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a command with a valid null standard input on Windows."""
 
+import os
 import subprocess
 import sys
 
@@ -14,7 +15,9 @@ def main(argv: list[str] | None = None) -> int:
     if command[0] == "python":
         command[0] = sys.executable
 
-    result = subprocess.run(command, stdin=subprocess.DEVNULL, check=False)
+    environment = dict(os.environ)
+    environment["AXIOM_FORGE_NORMALIZED_STDIN"] = "1"
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, check=False, env=environment)
     return result.returncode
 
 

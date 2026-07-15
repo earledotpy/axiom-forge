@@ -29,7 +29,7 @@ class TargetVerifyTests(unittest.TestCase):
         self.assertEqual(check["returncode"], 0)
         self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
-    def test_acceptance_check_inherits_normalized_stdin(self):
+    def test_acceptance_check_does_not_inherit_stdin_by_default(self):
         artifact = {
             "path": "tasks/example.accept.sh",
             "revision": "a" * 40,
@@ -42,6 +42,25 @@ class TargetVerifyTests(unittest.TestCase):
                 worktree=Path("worktree"),
                 timeout=30,
             )
+
+        self.assertIsNone(reason)
+        self.assertEqual(check["returncode"], 0)
+        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_acceptance_check_inherits_normalized_stdin(self):
+        artifact = {
+            "path": "tasks/example.accept.sh",
+            "revision": "a" * 40,
+            "sha256": "b" * 64,
+            "content": "#!/usr/bin/env bash\nexit 0\n",
+        }
+        with mock.patch.dict(target_verify.os.environ, {"AXIOM_FORGE_NORMALIZED_STDIN": "1"}):
+            with mock.patch.object(target_verify.subprocess, "run", return_value=Completed()) as run:
+                check, reason = target_verify.run_acceptance_check(
+                    artifact,
+                    worktree=Path("worktree"),
+                    timeout=30,
+                )
 
         self.assertIsNone(reason)
         self.assertEqual(check["returncode"], 0)

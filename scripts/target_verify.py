@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -192,14 +193,16 @@ def run_acceptance_check(artifact: dict, *, worktree: Path, timeout: int) -> tup
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".accept.sh", delete=False) as handle:
             handle.write(artifact["content"])
             script_path = Path(handle.name)
-        completed = subprocess.run(
-            ["bash", str(script_path)],
-            cwd=worktree,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        command_kwargs = {
+            "cwd": worktree,
+            "text": True,
+            "capture_output": True,
+            "timeout": timeout,
+            "check": False,
+        }
+        if os.environ.get("AXIOM_FORGE_NORMALIZED_STDIN") != "1":
+            command_kwargs["stdin"] = subprocess.DEVNULL
+        completed = subprocess.run(["bash", str(script_path)], **command_kwargs)
         check["returncode"] = completed.returncode
         check["stdout"] = completed.stdout
         check["stderr"] = completed.stderr

@@ -27,6 +27,7 @@ class RunWithDevnullTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0], [sys.executable, "child.py"])
         self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertFalse(run.call_args.kwargs["check"])
+        self.assertEqual(run.call_args.kwargs["env"]["AXIOM_FORGE_NORMALIZED_STDIN"], "1")
 
     def test_rejects_missing_command(self):
         self.assertEqual(run_with_devnull.main([]), 2)
