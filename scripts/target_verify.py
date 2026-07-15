@@ -156,6 +156,7 @@ def run_check(command, *, cwd: Path, timeout: int) -> tuple[dict, str | None]:
         completed = subprocess.run(
             command,
             cwd=cwd,
+            stdin=subprocess.DEVNULL,
             text=True,
             capture_output=True,
             timeout=timeout,
@@ -194,6 +195,7 @@ def run_acceptance_check(artifact: dict, *, worktree: Path, timeout: int) -> tup
         completed = subprocess.run(
             ["bash", str(script_path)],
             cwd=worktree,
+            stdin=subprocess.DEVNULL,
             text=True,
             capture_output=True,
             timeout=timeout,
