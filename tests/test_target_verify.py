@@ -29,7 +29,7 @@ class TargetVerifyTests(unittest.TestCase):
         self.assertEqual(check["returncode"], 0)
         self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
-    def test_acceptance_check_does_not_inherit_stdin(self):
+    def test_acceptance_check_inherits_normalized_stdin(self):
         artifact = {
             "path": "tasks/example.accept.sh",
             "revision": "a" * 40,
@@ -45,7 +45,7 @@ class TargetVerifyTests(unittest.TestCase):
 
         self.assertIsNone(reason)
         self.assertEqual(check["returncode"], 0)
-        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertNotIn("stdin", run.call_args.kwargs)
 
 
 if __name__ == "__main__":

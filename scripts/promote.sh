@@ -193,14 +193,20 @@ git -C "$GATE_WT" commit \
 PROMOTION_COMMIT="$(git -C "$GATE_WT" rev-parse HEAD)" || fail_closed "promotion_commit_lookup_failed"
 
 if [[ "$POST_VERIFY_MODE" == "target" ]]; then
-  python "$SCRIPT_DIR/target_verify.py" run \
+  TARGET_VERIFY_COMMAND=(python "$SCRIPT_DIR/target_verify.py" run \
     --config "$CONFIG" \
     --worktree "$GATE_WT" \
     --out "$RUN_DIR/post_verify.json" \
     --record "$RECORD" \
     --forge-root "$ROOT" \
-    --scope-file "$RUN_DIR/allowed-paths.txt" \
-    || fail_closed "post_promotion_verification_failed"
+    --scope-file "$RUN_DIR/allowed-paths.txt")
+  if [[ "${OS:-}" == "Windows_NT" ]]; then
+    python "$SCRIPT_DIR/run_with_devnull.py" "${TARGET_VERIFY_COMMAND[@]}" \
+      || fail_closed "post_promotion_verification_failed"
+  else
+    "${TARGET_VERIFY_COMMAND[@]}" \
+      || fail_closed "post_promotion_verification_failed"
+  fi
 else
   python "$SCRIPT_DIR/verifier_worktree.py" verify-target \
     --script-dir "$SCRIPT_DIR" \
