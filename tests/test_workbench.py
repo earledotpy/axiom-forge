@@ -777,5 +777,97 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(details['stderr'], 'adapter stderr\n')
         self.assertIn('diff --git', details['patch_diff'])
 
+    def test_historical_runs_are_discovered_read_only_from_existing_evidence(self):
+        completed_id = '20260712-010203-000001'
+        verified_id = '20260712-010203-000002'
+        failed_id = '20260712-010203-000003'
+        superseded_id = '20260712-010203-000004'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, completed_id)
+        verified_run = self.write_target_run_evidence(root, verified_id)
+        verified_run.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+        self.write_target_run_evidence(
+            root,
+            failed_id,
+            {'run_id': failed_id, 'run_status': 'FAILED', 'failure_reason': 'adapter_unavailable'},
+        )
+        self.write_target_run_evidence(
+            root,
+            superseded_id,
+            {
+                'run_id': superseded_id,
+                'run_status': 'COMPLETED',
+                'superseded_by_run_id': '20260712-020304-000005',
+                'superseded_reason': 'newer_delegation_target_base',
+            },
+        )
+
+        history = workbench.historical_captured_runs()
+        by_run_id = {entry.run_id: entry for entry in history}
+
+        self.assertEqual(set(by_run_id), {completed_id, verified_id, failed_id, superseded_id})
+        self.assertTrue(all(entry.read_only for entry in history))
+        self.assertEqual(by_run_id[completed_id].state, 'completed')
+        self.assertEqual(by_run_id[completed_id].summary.run_status, 'COMPLETED')
+        self.assertEqual(by_run_id[completed_id].verification_state, 'unverified')
+        self.assertEqual(by_run_id[verified_id].state, 'completed')
+        self.assertEqual(by_run_id[verified_id].verification_state, 'verified')
+        self.assertEqual(by_run_id[failed_id].state, 'failed')
+        self.assertEqual(by_run_id[failed_id].verification_state, 'unverified')
+        self.assertEqual(by_run_id[superseded_id].state, 'superseded')
+        self.assertEqual(by_run_id[superseded_id].verification_state, 'unverified')
+
+    def test_http_history_lists_read_only_runs_and_missing_evidence(self):
+        completed_id = '20260712-010203-000001'
+        missing_id = '20260712-010203-000002'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, completed_id)
+        (root / 'runs' / missing_id).mkdir(parents=True)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f"http://127.0.0.1:{server.server_port}/api/runs") as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        by_run_id = {entry['run_id']: entry for entry in payload['runs']}
+        self.assertEqual(payload['authority'], 'historical_captured_runs')
+        self.assertTrue(by_run_id[completed_id]['read_only'])
+        self.assertEqual(by_run_id[completed_id]['state'], 'completed')
+        self.assertEqual(by_run_id[completed_id]['verification_state'], 'unverified')
+        self.assertEqual(by_run_id[completed_id]['summary']['run_status'], 'COMPLETED')
+        self.assertEqual(by_run_id[missing_id]['state'], 'missing_evidence')
+        self.assertIsNone(by_run_id[missing_id]['summary'])
+        self.assertEqual(by_run_id[missing_id]['verification_state'], 'missing_evidence')
+        self.assertEqual(by_run_id[missing_id]['evidence_error'], 'captured_run_record_unavailable')
+
+    def test_workbench_html_includes_a_read_only_historical_run_view(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Historical captured runs', WORKBENCH_HTML)
+        self.assertIn('View evidence summary', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/runs")', WORKBENCH_HTML)
+        self.assertIn('if (!readOnly && payload.verification_result === "NOT_RUN"', WORKBENCH_HTML)
+        self.assertIn('renderEvidenceSummary(entry.run_id, false, true)', WORKBENCH_HTML)
+
+    def test_historical_runs_are_rederived_after_new_evidence_appears(self):
+        first_id = '20260712-010203-000001'
+        second_id = '20260712-010203-000002'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, first_id)
+
+        first_history = workbench.historical_captured_runs()
+        self.write_target_run_evidence(root, second_id)
+        second_history = workbench.historical_captured_runs()
+
+        self.assertEqual([entry.run_id for entry in first_history], [first_id])
+        self.assertEqual([entry.run_id for entry in second_history], [second_id, first_id])
+
 if __name__ == "__main__":
     unittest.main()
