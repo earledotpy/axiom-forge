@@ -205,7 +205,6 @@ scripts/
   forge_check.sh                    # full Forge-local health proof
 
   run_record.py
-  write_run_record.py
   verifier_worktree.py
   compatibility_result.py
   write_compatibility_result.py
