@@ -21,6 +21,7 @@ from scripts.delegation_artifact_set import (
     scope_sidecar_path,
     validate_delegation_task_file,
 )
+from scripts.operator_evidence import summarize_run
 from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 
 
@@ -359,20 +360,22 @@ class WorkbenchServer:
             result = self._verification_runner(command, self.forge_root)
         except OSError as error:
             raise WorkbenchVerificationError("target_mode_verifier_start_failed") from error
-        return _operator_evidence_summary(
+        return _summary_from_evidence(
+            _run_evidence(self.forge_root, run_dir),
             run_dir,
             verification_failure_reason=_verification_failure_reason(result),
         )
 
     def summary_for_captured_run(self, run_id: str) -> OperatorEvidenceSummary:
-        return _operator_evidence_summary(_captured_run_directory(self.forge_root, run_id))
+        run_dir = _captured_run_directory(self.forge_root, run_id)
+        return _summary_from_evidence(_run_evidence(self.forge_root, run_dir), run_dir)
 
     def historical_captured_runs(self) -> list[HistoricalCapturedRun]:
         runs_root = self.forge_root / "runs"
         if not runs_root.is_dir():
             return []
         return [
-            _historical_captured_run(run_dir)
+            _historical_captured_run(self.forge_root, run_dir)
             for run_dir in sorted(runs_root.iterdir(), key=lambda path: path.name, reverse=True)
             if run_dir.is_dir() and _is_captured_run_id(run_dir.name)
         ]
@@ -464,7 +467,7 @@ def _approved_execution_target(root: Path, task_file_value: str) -> tuple[Path, 
 def _retry_execution_target(root: Path, run_id: str) -> str:
     try:
         run_dir = _captured_run_directory(root, run_id)
-        summary = _operator_evidence_summary(run_dir)
+        summary = _summary_from_evidence(_run_evidence(root, run_dir), run_dir)
     except WorkbenchVerificationError as error:
         raise WorkbenchExecutionError(str(error)) from error
     if summary.run_status != "FAILED" and summary.verification_result != "FAIL":
@@ -565,44 +568,56 @@ def _run_target_mode_verifier(command: list[str], root: Path) -> subprocess.Comp
     return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
 
 
-def _operator_evidence_summary(
-    run_dir: Path, verification_failure_reason: str | None = None
-) -> OperatorEvidenceSummary:
+def _run_evidence(forge_root: Path, run_dir: Path) -> dict:
     try:
         record = json.loads((run_dir / "record.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise WorkbenchVerificationError("captured_run_record_unavailable") from error
     if not isinstance(record, dict) or record.get("run_id") != run_dir.name:
         raise WorkbenchVerificationError("captured_run_record_invalid")
+    return summarize_run(run_dir, forge_root)
 
-    run_status = record.get("run_status")
-    if not isinstance(run_status, str):
-        run_status = "missing_run_status"
-    failure_reason = record.get("failure_reason")
-    if not isinstance(failure_reason, str):
-        failure_reason = None
-    verification_result, verification_reason, acceptance_result = _verification_summary(
-        run_dir, verification_failure_reason
+
+def _summary_from_evidence(
+    evidence: dict, run_dir: Path, verification_failure_reason: str | None = None
+) -> OperatorEvidenceSummary:
+    run_status = evidence["run"]["status"] or "missing_run_status"
+    verification_result, verification_reason = _verification_view(
+        evidence["verification"], verification_failure_reason
     )
     return OperatorEvidenceSummary(
         authority="operator_evidence_summary",
         run_id=run_dir.name,
         task_intent=_task_intent_from_evidence(run_dir),
-        approved_scope=_scope_from_evidence(run_dir),
-        adapter=record.get("agent") if isinstance(record.get("agent"), str) else "missing_adapter",
+        approved_scope=evidence["task"]["approved_paths"],
+        adapter=evidence["run"]["adapter"] or "missing_adapter",
         run_status=run_status,
-        changed_paths=_changed_paths_from_evidence(run_dir),
+        changed_paths=evidence["patch"]["changed_paths"],
         verification_result=verification_result,
         verification_reason=verification_reason,
-        acceptance_result=acceptance_result,
-        failure_reason=failure_reason,
+        acceptance_result=evidence["acceptance"]["status"],
+        failure_reason=evidence["run"]["failure_reason"],
         next_allowed_actions=_next_allowed_actions(run_status, verification_result),
     )
 
 
-def _historical_captured_run(run_dir: Path) -> HistoricalCapturedRun:
+def _verification_view(
+    verification: dict, verification_failure_reason: str | None
+) -> tuple[str, str | None]:
+    status = verification["status"]
+    if status == "MISSING":
+        if verification_failure_reason is None:
+            return "NOT_RUN", None
+        return "FAIL", verification_failure_reason
+    reason = verification["reason"]
+    if not isinstance(reason, str) or not reason:
+        reason = verification_failure_reason
+    return ("PASS" if status == "PASS" else "FAIL"), reason
+
+
+def _historical_captured_run(forge_root: Path, run_dir: Path) -> HistoricalCapturedRun:
     try:
-        summary = _operator_evidence_summary(run_dir)
+        evidence = _run_evidence(forge_root, run_dir)
     except WorkbenchVerificationError as error:
         return HistoricalCapturedRun(
             authority="historical_captured_run",
@@ -617,31 +632,20 @@ def _historical_captured_run(run_dir: Path) -> HistoricalCapturedRun:
     return HistoricalCapturedRun(
         authority="historical_captured_run",
         run_id=run_dir.name,
-        state=_historical_run_state(run_dir, summary),
-        verification_state=_historical_verification_state(summary),
+        state=evidence["state"],
+        verification_state=_historical_verification_state(evidence["verification"]["status"]),
         read_only=True,
-        summary=summary,
+        summary=_summary_from_evidence(evidence, run_dir),
         evidence_error=None,
     )
 
 
-def _historical_run_state(run_dir: Path, summary: OperatorEvidenceSummary) -> str:
-    record = _evidence_json(run_dir / "record.json")
-    if isinstance(record.get("superseded_by_run_id"), str) and record["superseded_by_run_id"]:
-        return "superseded"
-    if summary.run_status == "FAILED":
-        return "failed"
-    if summary.run_status == "COMPLETED":
-        return "completed"
-    return "unknown"
-
-
-def _historical_verification_state(summary: OperatorEvidenceSummary) -> str:
-    if summary.verification_result == "PASS":
+def _historical_verification_state(verification_status: object) -> str:
+    if verification_status == "PASS":
         return "verified"
-    if summary.verification_result == "FAIL":
-        return "failed"
-    return "unverified"
+    if verification_status == "MISSING":
+        return "unverified"
+    return "failed"
 
 
 def _evidence_json(path: Path) -> dict[str, object]:
@@ -650,29 +654,6 @@ def _evidence_json(path: Path) -> dict[str, object]:
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
-
-def _verification_summary(
-    run_dir: Path, verification_failure_reason: str | None
-) -> tuple[str, str | None, str]:
-    verify_path = run_dir / "verify.json"
-    if not verify_path.is_file():
-        if verification_failure_reason is None:
-            return "NOT_RUN", None, "NOT_RUN"
-        return "FAIL", verification_failure_reason, "NOT_RUN"
-    try:
-        verify = json.loads(verify_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return "FAIL", "invalid_verification_evidence", "NOT_RUN"
-    if not isinstance(verify, dict):
-        return "FAIL", "invalid_verification_evidence", "NOT_RUN"
-    status = "PASS" if verify.get("status") == "PASS" else "FAIL"
-    reason = verify.get("reason") if isinstance(verify.get("reason"), str) else verification_failure_reason
-    acceptance = verify.get("acceptance")
-    if not isinstance(acceptance, dict) or not isinstance(acceptance.get("returncode"), int):
-        acceptance_result = "NOT_RUN"
-    else:
-        acceptance_result = "PASS" if acceptance["returncode"] == 0 else "FAIL"
-    return status, reason, acceptance_result
 
 
 def _task_intent_from_evidence(run_dir: Path) -> str:
@@ -691,23 +672,6 @@ def _task_intent_from_evidence(run_dir: Path) -> str:
         if line.strip() and not line.lstrip().startswith("<!--"):
             return line.strip()
     return "missing_task_intent"
-
-def _scope_from_evidence(run_dir: Path) -> list[str]:
-    return [
-        line.strip()
-        for line in _evidence_text(run_dir / "allowed-paths.txt").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-
-
-def _changed_paths_from_evidence(run_dir: Path) -> list[str]:
-    paths: list[str] = []
-    for line in _evidence_text(run_dir / "patch.diff").splitlines():
-        match = re.match(r"diff --git a/(.+) b/(.+)$", line)
-        if match and match.group(2) not in paths:
-            paths.append(match.group(2))
-    return paths
-
 
 def _evidence_text(path: Path) -> str:
     try:

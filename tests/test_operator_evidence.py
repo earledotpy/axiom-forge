@@ -210,6 +210,53 @@ class OperatorEvidenceTests(unittest.TestCase):
         self.assertEqual(summary["runs"][1]["state"], "availability-failure")
         self.assertEqual(summary["runs"][1]["drill_down"]["record"], (second / "record.json").as_posix())
 
+    def test_run_summary_exposes_approved_scope_and_changed_paths(self):
+        run_dir = self.write_run()
+        (run_dir / "allowed-paths.txt").write_text(
+            "# approved scope\napp/target.py\n\ntests/test_target.py\n", encoding="utf-8"
+        )
+
+        summary = operator_evidence.summarize_run(run_dir, self.root)
+
+        self.assertEqual(summary["task"]["approved_paths"], ["app/target.py", "tests/test_target.py"])
+        self.assertEqual(summary["patch"]["changed_paths"], ["app.py"])
+
+    def test_run_summary_acceptance_result_follows_verification_evidence(self):
+        run_dir = self.write_run(
+            verify={
+                "schema_version": 1,
+                "status": "FAIL",
+                "reason": "target_acceptance_failed",
+                "acceptance": {"returncode": 1},
+            }
+        )
+
+        summary = operator_evidence.summarize_run(run_dir, self.root)
+
+        self.assertEqual(summary["acceptance"]["status"], "FAIL")
+
+    def test_run_summary_acceptance_pass(self):
+        run_dir = self.write_run(
+            verify={"schema_version": 1, "status": "PASS", "acceptance": {"returncode": 0}}
+        )
+
+        with patch("scripts.operator_evidence.validate_review") as validate:
+            validate.side_effect = operator_evidence.PromotionReviewError("missing_promotion_review_result")
+            summary = operator_evidence.summarize_run(run_dir, self.root)
+
+        self.assertEqual(summary["acceptance"]["status"], "PASS")
+
+    def test_run_summary_defaults_for_missing_optional_evidence(self):
+        run_dir = self.root / "runs" / "run-9"
+        run_dir.mkdir(parents=True)
+        write_json(run_dir / "record.json", base_record(run_id="run-9"))
+
+        summary = operator_evidence.summarize_run(run_dir, self.root)
+
+        self.assertEqual(summary["task"]["approved_paths"], [])
+        self.assertEqual(summary["patch"]["changed_paths"], [])
+        self.assertEqual(summary["acceptance"]["status"], "NOT_RUN")
+
     def test_stale_base_status_is_visible(self):
         run_dir = self.write_run(
             verify={"schema_version": 1, "status": "PASS"},
