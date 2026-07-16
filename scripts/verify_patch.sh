@@ -29,16 +29,18 @@ PATCH="$RUN_DIR/patch.diff"
 OUT="$RUN_DIR/verify.json"
 TARGET_SCOPE_PATH=""
 
-RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
-RUN_MODE="$(python - "$RECORD" <<'PY'
-import json
-import sys
-
-record = json.load(open(sys.argv[1], encoding="utf-8"))
-print(record.get("run_mode", "forge-local"))
-PY
-)" || die "invalid_run_mode"
+if ! RECORD_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" \
+  run_id base_sha --default run_mode forge-local)"; then
+  case "$RECORD_VARS" in
+    missing_json_key_run_id) die "missing_run_id" ;;
+    missing_json_key_base_sha) die "missing_base_sha" ;;
+    *) die "invalid_run_mode" ;;
+  esac
+fi
+eval "$RECORD_VARS"
+RUN_ID="$run_id"
+BASE_SHA="$base_sha"
+RUN_MODE="$run_mode"
 
 if [[ "$TARGET_MODE" -eq 0 && "$RUN_MODE" == "target" ]]; then
   die "target_mode_requires_explicit_flag"

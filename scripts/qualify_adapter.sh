@@ -121,7 +121,11 @@ while IFS=$'\t' read -r _ _ path; do
   fi
 done < <(git apply --numstat "$PATCH")
 
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RUN_DIR/record.json" base_sha)"
+if ! BASE_SHA_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RUN_DIR/record.json" base_sha)"; then
+  die "qualification_base_sha_missing"
+fi
+eval "$BASE_SHA_VARS"
+BASE_SHA="$base_sha"
 if ! VERIFY_WT="$(
   python "$SCRIPT_DIR/verifier_worktree.py" create-detached \
     --repo-root "$ROOT" \
