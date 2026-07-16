@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from forge.git import run_git
+from forge.committed_evidence import CommittedEvidenceError, read_committed_file
 
 
 REVIEW_DIR = PurePosixPath("reviews/promotion")
@@ -74,11 +75,18 @@ def committed_review_revision(forge_root: Path, review_path: PurePosixPath) -> s
 
 
 def load_committed_review(forge_root: Path, revision: str, review_path: PurePosixPath) -> dict:
-    shown = run_git(forge_root, "show", f"{revision}:{review_path}")
-    if shown.returncode != 0:
-        raise PromotionReviewError("missing_promotion_review_result")
     try:
-        value = json.loads(shown.stdout)
+        content = read_committed_file(
+            forge_root,
+            revision,
+            str(review_path),
+            missing_reason="missing_promotion_review_result",
+            encoding=None,
+        )
+    except CommittedEvidenceError as exc:
+        raise PromotionReviewError(exc.reason) from exc
+    try:
+        value = json.loads(content)
     except Exception:
         raise PromotionReviewError("malformed_promotion_review_result")
     if not isinstance(value, dict):

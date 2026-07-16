@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
+from forge.committed_evidence import CommittedEvidenceError, read_committed_file
 from forge.git import run_git
 
 from scripts.delegation_artifact_set import (
@@ -494,16 +495,16 @@ def _require_retry_delegation_boundary(root: Path, revision: str, task_file: Pat
 
 
 def _retry_revision_artifact_content(root: Path, revision: str, repo_path: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), "show", f"{revision}:{repo_path}"],
-        text=True,
-        capture_output=True,
-        check=False,
-        encoding="utf-8",
-    )
-    if result.returncode != 0:
-        raise WorkbenchExecutionError("retry_delegation_provenance_unavailable")
-    return result.stdout
+    try:
+        return read_committed_file(
+            root,
+            revision,
+            repo_path,
+            missing_reason="retry_delegation_provenance_unavailable",
+            encoding="utf-8",
+        )
+    except CommittedEvidenceError as exc:
+        raise WorkbenchExecutionError(exc.reason) from exc
 
 def _run_target_mode_runner(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
