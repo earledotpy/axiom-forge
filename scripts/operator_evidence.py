@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 from pathlib import Path
 
 try:
@@ -56,6 +57,37 @@ def status_record(path: Path, kind: str) -> dict:
         "status": record.get("status"),
         "reason": record.get("reason"),
     }
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def approved_scope_paths(run_dir: Path) -> list[str]:
+    return [
+        line.strip()
+        for line in read_text(run_dir / "allowed-paths.txt").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def changed_paths(run_dir: Path) -> list[str]:
+    paths: list[str] = []
+    for line in read_text(run_dir / "patch.diff").splitlines():
+        match = re.match(r"diff --git a/(.+) b/(.+)$", line)
+        if match and match.group(2) not in paths:
+            paths.append(match.group(2))
+    return paths
+
+
+def acceptance_status(verify: dict | None) -> str:
+    acceptance = verify.get("acceptance") if verify is not None else None
+    if not isinstance(acceptance, dict) or not isinstance(acceptance.get("returncode"), int):
+        return "NOT_RUN"
+    return "PASS" if acceptance["returncode"] == 0 else "FAIL"
 
 
 def run_drill_down(run_dir: Path) -> dict:
@@ -141,14 +173,17 @@ def summarize_run(run_dir: Path, forge_root: Path | None = None) -> dict:
             or non_empty_string(record, "task_file"),
             "approved_scope_file": non_empty_string(record, "target_scope_file"),
             "approved_scope_sha256": non_empty_string(record, "target_scope_sha256"),
+            "approved_paths": approved_scope_paths(run_dir),
         },
         "patch": {
             "state": "present" if (run_dir / "patch.diff").exists() else "missing",
             "path": (run_dir / "patch.diff").as_posix(),
             "sha256": non_empty_string(record, "patch_sha256"),
+            "changed_paths": changed_paths(run_dir),
         },
         "verification": status_record(run_dir / "verify.json", "verification"),
         "post_promotion_verification": status_record(run_dir / "post_verify.json", "post_promotion_verification"),
+        "acceptance": {"status": acceptance_status(verify)},
         "promotion_review": review,
         "promotion": {
             "status": non_empty_string(promotion, "status"),

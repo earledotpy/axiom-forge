@@ -809,15 +809,81 @@ class TestWorkbench(unittest.TestCase):
 
         self.assertEqual(set(by_run_id), {completed_id, verified_id, failed_id, superseded_id})
         self.assertTrue(all(entry.read_only for entry in history))
-        self.assertEqual(by_run_id[completed_id].state, 'completed')
+        self.assertEqual(by_run_id[completed_id].state, 'captured')
         self.assertEqual(by_run_id[completed_id].summary.run_status, 'COMPLETED')
         self.assertEqual(by_run_id[completed_id].verification_state, 'unverified')
-        self.assertEqual(by_run_id[verified_id].state, 'completed')
+        self.assertEqual(by_run_id[verified_id].state, 'verified')
         self.assertEqual(by_run_id[verified_id].verification_state, 'verified')
         self.assertEqual(by_run_id[failed_id].state, 'failed')
         self.assertEqual(by_run_id[failed_id].verification_state, 'unverified')
         self.assertEqual(by_run_id[superseded_id].state, 'superseded')
         self.assertEqual(by_run_id[superseded_id].verification_state, 'unverified')
+
+    def test_historical_run_surfaces_adapter_availability_failure_state(self):
+        run_id = '20260712-010203-000006'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(
+            root,
+            run_id,
+            {
+                'run_id': run_id,
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_quota_exhausted',
+                'failure_class': 'adapter_availability',
+                'agent': 'codex',
+                'run_mode': 'target',
+            },
+        )
+
+        history = workbench.historical_captured_runs()
+
+        self.assertEqual(history[0].state, 'availability-failure')
+        self.assertEqual(history[0].summary.failure_reason, 'adapter_quota_exhausted')
+        self.assertEqual(history[0].summary.next_allowed_actions, ['inspect_details', 'retry_later'])
+
+    def test_historical_run_surfaces_promotion_ready_state(self):
+        run_id = '20260712-010203-000007'
+        workbench, root = self.make_workbench()
+        run_dir = self.write_target_run_evidence(
+            root,
+            run_id,
+            {
+                'run_id': run_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'run_mode': 'target',
+                'patch_sha256': 'b' * 64,
+            },
+        )
+        run_dir.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+        review_path = root / 'reviews' / 'promotion' / f'{run_id}.json'
+        review_path.parent.mkdir(parents=True)
+        review_path.write_text(
+            json.dumps(
+                {
+                    'schema_version': 1,
+                    'review_type': 'promotion',
+                    'run_id': run_id,
+                    'patch_sha256': 'b' * 64,
+                    'reviewer': 'operator',
+                    'decision': 'APPROVED',
+                    'concerns': 'No concerns.',
+                    'follow_up_tasks': [],
+                }
+            ),
+            encoding='utf-8',
+        )
+        subprocess.run(['git', '-C', str(root), 'add', 'reviews/promotion'], check=True)
+        subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Record promotion review'], check=True)
+
+        history = workbench.historical_captured_runs()
+
+        self.assertEqual(history[0].state, 'promotion-ready')
+        self.assertEqual(history[0].verification_state, 'verified')
+        self.assertEqual(history[0].summary.acceptance_result, 'PASS')
 
     def test_http_history_lists_read_only_runs_and_missing_evidence(self):
         completed_id = '20260712-010203-000001'
@@ -839,7 +905,7 @@ class TestWorkbench(unittest.TestCase):
         by_run_id = {entry['run_id']: entry for entry in payload['runs']}
         self.assertEqual(payload['authority'], 'historical_captured_runs')
         self.assertTrue(by_run_id[completed_id]['read_only'])
-        self.assertEqual(by_run_id[completed_id]['state'], 'completed')
+        self.assertEqual(by_run_id[completed_id]['state'], 'captured')
         self.assertEqual(by_run_id[completed_id]['verification_state'], 'unverified')
         self.assertEqual(by_run_id[completed_id]['summary']['run_status'], 'COMPLETED')
         self.assertEqual(by_run_id[missing_id]['state'], 'missing_evidence')
