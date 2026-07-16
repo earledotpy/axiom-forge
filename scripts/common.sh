@@ -13,11 +13,3 @@ need_cmd() {
 safe_run_id() {
   [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]
 }
-
-json_value() {
-  local output=""
-  local key="$2"
-  output="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$1" "$key")" || return
-  eval "$output"
-  printf '%s\n' "${!key}"
-}

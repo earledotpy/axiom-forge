@@ -29,14 +29,22 @@ def load_payload(*, json_text: str | None, json_file: Path | None) -> Mapping[st
     return payload
 
 
-def extract_assignments(payload: Mapping[str, object], keys: Sequence[str]) -> str:
+def extract_assignments(
+    payload: Mapping[str, object],
+    keys: Sequence[str],
+    defaults: Mapping[str, str] | None = None,
+) -> str:
+    defaults = defaults or {}
     assignments = []
     for key in keys:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
             raise JsonShellVarsError("invalid_json_field")
         if key not in payload:
-            raise JsonShellVarsError(f"missing_json_key_{key}")
-        value = payload[key]
+            if key not in defaults:
+                raise JsonShellVarsError(f"missing_json_key_{key}")
+            value = defaults[key]
+        else:
+            value = payload[key]
         if value is None:
             value = ""
         elif not isinstance(value, str):

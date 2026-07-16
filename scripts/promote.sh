@@ -30,7 +30,12 @@ RECORD="$RUN_DIR/record.json"
 PATCH="$RUN_DIR/patch.diff"
 PROMOTION_FILE="$RUN_DIR/promotion.json"
 
-if ! RECORD_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" run_id base_sha)"; then
+if ! RECORD_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" \
+  run_id base_sha \
+  --default run_mode forge-local \
+  --default target_name "" \
+  --default target_base_branch "" \
+  --default target_remote_url "")"; then
   case "$RECORD_VARS" in
     missing_json_key_run_id) die "missing_run_id" ;;
     missing_json_key_base_sha) die "missing_base_sha" ;;
@@ -40,22 +45,14 @@ fi
 eval "$RECORD_VARS"
 RUN_ID="$run_id"
 BASE_SHA="$base_sha"
+RUN_MODE="$run_mode"
+TARGET_NAME="$target_name"
+TARGET_BASE_BRANCH="$target_base_branch"
+TARGET_REMOTE_URL="$target_remote_url"
 DEFAULT_BASE="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" project.default_base)" || die "malformed_gate_toml"
 BRANCH_PREFIX="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" promotion.branch_prefix)" || die "malformed_gate_toml"
 BRANCH="${BRANCH_PREFIX}${RUN_ID}"
-RUN_MODE="$(python - "$RECORD" <<'PY'
-import json
-import sys
-
-record = json.load(open(sys.argv[1], encoding="utf-8"))
-print(record.get("run_mode", "forge-local"))
-PY
-)" || die "invalid_run_mode"
-
 TARGET_REPO=""
-TARGET_NAME=""
-TARGET_BASE_BRANCH=""
-TARGET_REMOTE_URL=""
 DELEGATION_TARGET_BASE_SHA=""
 PROMOTION_REPO="$ROOT"
 VERIFY_FLAG=()
@@ -79,18 +76,6 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
 
   TARGET_REPO="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
   BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
-  if ! TARGET_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" target_name target_base_branch target_remote_url)"; then
-    case "$TARGET_VARS" in
-      missing_json_key_target_name) die "missing_target_name" ;;
-      missing_json_key_target_base_branch) die "missing_target_base_branch" ;;
-      missing_json_key_target_remote_url) die "missing_target_remote_url" ;;
-      *) die "missing_target_name" ;;
-    esac
-  fi
-  eval "$TARGET_VARS"
-  TARGET_NAME="$target_name"
-  TARGET_BASE_BRANCH="$target_base_branch"
-  TARGET_REMOTE_URL="$target_remote_url"
   DELEGATION_TARGET_BASE_SHA="$BASE_SHA"
   PROMOTION_REPO="$TARGET_REPO"
   VERIFY_FLAG=(--target)

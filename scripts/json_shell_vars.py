@@ -18,16 +18,30 @@ def extract(arguments: list[str]) -> int:
     if len(arguments) < 3 or arguments[0] not in {"--file", "--json"}:
         return fail("invalid_json_arguments")
 
-    source, value, *keys = arguments
+    source, source_value, *items = arguments
+    keys: list[str] = []
+    defaults: dict[str, str] = {}
+    while items:
+        item, *items = items
+        if item == "--default":
+            if len(items) < 2:
+                return fail("invalid_json_arguments")
+            key, default_value, *items = items
+            if key in defaults:
+                return fail("duplicate_json_field")
+            defaults[key] = default_value
+            keys.append(key)
+        else:
+            keys.append(item)
     if not keys:
         return fail("invalid_json_arguments")
 
     try:
         payload = load_payload(
-            json_text=value if source == "--json" else None,
-            json_file=Path(value) if source == "--file" else None,
+            json_text=source_value if source == "--json" else None,
+            json_file=Path(source_value) if source == "--file" else None,
         )
-        print(extract_assignments(payload, keys))
+        print(extract_assignments(payload, keys, defaults))
     except JsonShellVarsError as error:
         return fail(error.reason)
     return 0
