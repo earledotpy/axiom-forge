@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
+from forge.git import run_git
 
 from scripts.delegation_artifact_set import (
     DelegationArtifactSetError,
@@ -787,12 +788,7 @@ def _commit_delegation_artifacts(
 
 
 def _git_output(root: Path, args: list[str], failure_reason: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    result = run_git(root, *args)
     if result.returncode != 0:
         raise WorkbenchApprovalError(failure_reason)
     return result.stdout.strip()

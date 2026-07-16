@@ -2,8 +2,14 @@
 import argparse
 import json
 import re
-import subprocess
+import sys
 from pathlib import Path, PurePosixPath
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.git import run_git
 
 
 REVIEW_DIR = PurePosixPath("reviews/promotion")
@@ -17,14 +23,6 @@ class PromotionReviewError(Exception):
         super().__init__(reason)
         self.reason = reason
 
-
-def run_git(forge_root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(forge_root), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
 
 
 def load_json(path: Path, reason: str) -> dict:

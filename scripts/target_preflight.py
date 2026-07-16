@@ -2,9 +2,14 @@
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.git import run_git
 
 try:
     import tomllib
@@ -18,14 +23,6 @@ class PreflightFailure(Exception):
         super().__init__(reason)
         self.reason = reason
 
-
-def run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
 
 
 def normalize_path(path: Path) -> str:
