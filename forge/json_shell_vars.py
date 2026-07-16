@@ -21,7 +21,7 @@ def load_payload(*, json_text: str | None, json_file: Path | None) -> Mapping[st
             raise JsonShellVarsError("invalid_json_arguments")
     except JsonShellVarsError:
         raise
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         raise JsonShellVarsError("invalid_json_payload") from None
 
     if not isinstance(payload, dict):
