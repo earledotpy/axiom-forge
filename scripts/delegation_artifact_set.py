@@ -4,8 +4,14 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import shutil
-import subprocess
 import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.committed_evidence import CommittedEvidenceError, read_committed_file
 
 try:
     from target_task_scope import TargetTaskScopeError, load_scope_sidecar
@@ -196,20 +202,6 @@ def acceptance_repo_path_for_task(task_file: str) -> str:
     name = str(task_path)
     return f"{name[:-len('.task.md')]}.accept.sh"
 
-def _committed_file_content(root: Path, revision: str, repo_path: str, missing_reason: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), "show", f"{revision}:{repo_path}"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        encoding="utf-8",
-    )
-    if result.returncode != 0:
-        raise DelegationArtifactSetError(missing_reason)
-    return result.stdout
-
-
 def committed_acceptance_artifact(
     *,
     forge_root: Path,
@@ -226,12 +218,16 @@ def committed_acceptance_artifact(
     if acceptance_path in allowed_paths:
         raise DelegationArtifactSetError(TARGET_REASON_ACCEPTANCE_IN_SCOPE)
 
-    content = _committed_file_content(
-        Path(forge_root),
-        delegation_artifact_revision,
-        acceptance_path,
-        TARGET_REASON_MISSING_ACCEPTANCE,
-    )
+    try:
+        content = read_committed_file(
+            Path(forge_root),
+            delegation_artifact_revision,
+            acceptance_path,
+            missing_reason=TARGET_REASON_MISSING_ACCEPTANCE,
+            encoding="utf-8",
+        )
+    except CommittedEvidenceError as exc:
+        raise DelegationArtifactSetError(exc.reason) from exc
     if not content.strip() or "\x00" in content or "\r" in content:
         raise DelegationArtifactSetError(TARGET_REASON_INVALID_ACCEPTANCE)
 
@@ -289,12 +285,16 @@ def prepare_target_run_artifacts(
     if acceptance_repo_path in artifact_set.approved_paths:
         raise DelegationArtifactSetError(TARGET_REASON_ACCEPTANCE_IN_SCOPE)
 
-    content = _committed_file_content(
-        forge_root,
-        delegation_artifact_revision,
-        acceptance_repo_path,
-        TARGET_REASON_MISSING_ACCEPTANCE,
-    )
+    try:
+        content = read_committed_file(
+            forge_root,
+            delegation_artifact_revision,
+            acceptance_repo_path,
+            missing_reason=TARGET_REASON_MISSING_ACCEPTANCE,
+            encoding="utf-8",
+        )
+    except CommittedEvidenceError as exc:
+        raise DelegationArtifactSetError(exc.reason) from exc
     if not content.strip():
         raise DelegationArtifactSetError(TARGET_REASON_INVALID_ACCEPTANCE)
 
