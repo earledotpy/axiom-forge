@@ -30,8 +30,16 @@ RECORD="$RUN_DIR/record.json"
 PATCH="$RUN_DIR/patch.diff"
 PROMOTION_FILE="$RUN_DIR/promotion.json"
 
-RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
+if ! RECORD_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" run_id base_sha)"; then
+  case "$RECORD_VARS" in
+    missing_json_key_run_id) die "missing_run_id" ;;
+    missing_json_key_base_sha) die "missing_base_sha" ;;
+    *) die "missing_run_id" ;;
+  esac
+fi
+eval "$RECORD_VARS"
+RUN_ID="$run_id"
+BASE_SHA="$base_sha"
 DEFAULT_BASE="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" project.default_base)" || die "malformed_gate_toml"
 BRANCH_PREFIX="$(python "$SCRIPT_DIR/toml_get.py" "$CONFIG" promotion.branch_prefix)" || die "malformed_gate_toml"
 BRANCH="${BRANCH_PREFIX}${RUN_ID}"
@@ -71,9 +79,18 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
 
   TARGET_REPO="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
   BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
-  TARGET_NAME="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_name)" || die "missing_target_name"
-  TARGET_BASE_BRANCH="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_base_branch)" || die "missing_target_base_branch"
-  TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_remote_url)" || die "missing_target_remote_url"
+  if ! TARGET_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RECORD" target_name target_base_branch target_remote_url)"; then
+    case "$TARGET_VARS" in
+      missing_json_key_target_name) die "missing_target_name" ;;
+      missing_json_key_target_base_branch) die "missing_target_base_branch" ;;
+      missing_json_key_target_remote_url) die "missing_target_remote_url" ;;
+      *) die "missing_target_name" ;;
+    esac
+  fi
+  eval "$TARGET_VARS"
+  TARGET_NAME="$target_name"
+  TARGET_BASE_BRANCH="$target_base_branch"
+  TARGET_REMOTE_URL="$target_remote_url"
   DELEGATION_TARGET_BASE_SHA="$BASE_SHA"
   PROMOTION_REPO="$TARGET_REPO"
   VERIFY_FLAG=(--target)

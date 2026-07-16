@@ -28,8 +28,8 @@ RUN_RECORD_REASON="$(
     --patch-sha256-actual "$PATCH_ACTUAL"
 )" || die "$RUN_RECORD_REASON"
 
-RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
+RUN_ID="$(json_value "$RECORD" run_id)" || die "missing_run_id"
+BASE_SHA="$(json_value "$RECORD" base_sha)" || die "missing_base_sha"
 RUN_MODE="$(python - "$RECORD" <<'PY'
 import json
 import sys
@@ -39,7 +39,7 @@ PY
 )" || die "invalid_run_mode"
 
 if [[ "$RUN_MODE" == "target" ]]; then
-  TARGET_SCOPE_FILE="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_scope_file)" || die "missing_target_scope_file"
+  TARGET_SCOPE_FILE="$(json_value "$RECORD" target_scope_file)" || die "missing_target_scope_file"
   [[ "$TARGET_SCOPE_FILE" == "allowed-paths.txt" ]] || die "invalid_target_scope_file"
   TARGET_SCOPE_PATH="$RUN_DIR/$TARGET_SCOPE_FILE"
   [[ -s "$TARGET_SCOPE_PATH" ]] || die "missing_or_empty_target_scope_file"
@@ -54,11 +54,11 @@ if [[ "$RUN_MODE" == "target" ]]; then
       --target-scope-sha256-actual "$TARGET_SCOPE_ACTUAL"
   )" || die "$RUN_RECORD_REASON"
 
-  DELEGATION_ARTIFACT_REVISION="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" delegation_artifact_revision)" || die "missing_delegation_artifact_revision"
+  DELEGATION_ARTIFACT_REVISION="$(json_value "$RECORD" delegation_artifact_revision)" || die "missing_delegation_artifact_revision"
   git -C "$SCRIPT_DIR/.." cat-file -e "$DELEGATION_ARTIFACT_REVISION^{commit}" 2>/dev/null || die "delegation_artifact_revision_not_found"
 
-  DELEGATION_TARGET_BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" delegation_target_base_sha)" || die "missing_delegation_target_base_sha"
-  TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" target_repo)" || die "missing_target_repo"
+  DELEGATION_TARGET_BASE_SHA="$(json_value "$RECORD" delegation_target_base_sha)" || die "missing_delegation_target_base_sha"
+  TARGET_REPO="$(json_value "$RECORD" target_repo)" || die "missing_target_repo"
   git -C "$TARGET_REPO" cat-file -e "$DELEGATION_TARGET_BASE_SHA^{commit}" 2>/dev/null || die "target_base_sha_not_found"
 else
   git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || die "base_sha_not_found"

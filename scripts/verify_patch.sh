@@ -29,8 +29,8 @@ PATCH="$RUN_DIR/patch.diff"
 OUT="$RUN_DIR/verify.json"
 TARGET_SCOPE_PATH=""
 
-RUN_ID="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" run_id)" || die "missing_run_id"
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RECORD" base_sha)" || die "missing_base_sha"
+RUN_ID="$(json_value "$RECORD" run_id)" || die "missing_run_id"
+BASE_SHA="$(json_value "$RECORD" base_sha)" || die "missing_base_sha"
 RUN_MODE="$(python - "$RECORD" <<'PY'
 import json
 import sys

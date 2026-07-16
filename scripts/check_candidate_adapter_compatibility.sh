@@ -64,7 +64,7 @@ COMPAT_RESULT_FILE="$ROOT/compatibility/results/$ADAPTER/$RUN_ID.json"
 ADAPTER_SCRIPT_REVISION="$(git rev-parse "HEAD:agents/$ADAPTER.sh" 2>/dev/null || true)"
 
 if [[ "$CAPTURE_STATUS" -ne 0 ]]; then
-  RUN_FAILURE_REASON="$(python "$SCRIPT_DIR/json_get.py" "$RUN_DIR/record.json" failure_reason 2>/dev/null || true)"
+  RUN_FAILURE_REASON="$(json_value "$RUN_DIR/record.json" failure_reason 2>/dev/null || true)"
   [[ -n "$RUN_FAILURE_REASON" ]] || RUN_FAILURE_REASON="run_capture_failed"
   write_result "INCOMPATIBLE" "run_capture" "$RUN_FAILURE_REASON" "NOT_RUN" "NOT_RUN"
   echo "COMPATIBILITY: FAIL $RUN_ID"

@@ -117,21 +117,23 @@ prepare_target_run_artifacts() {
     fail_run "${artifact_json:-invalid_delegation_artifact_set}"
   fi
 
-  TARGET_SCOPE_FILE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["target_scope_file"])' "$artifact_json")" \
-    || fail_run "invalid_delegation_artifact_set"
-  TARGET_SCOPE_SHA256="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["target_scope_sha256"])' "$artifact_json")" \
-    || fail_run "invalid_delegation_artifact_set"
-  DELEGATION_ARTIFACT_REVISION="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["delegation_artifact_revision"])' "$artifact_json")" \
-    || fail_run "invalid_delegation_artifact_set"
-  DELEGATION_TASK_FILE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["delegation_task_file"])' "$artifact_json")" \
-    || fail_run "invalid_delegation_artifact_set"
+  local artifact_vars=""
+  artifact_vars="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --json "$artifact_json" target_scope_file target_scope_sha256 delegation_artifact_revision delegation_task_file)" || fail_run "invalid_delegation_artifact_set"
+  eval "$artifact_vars"
+  TARGET_SCOPE_FILE="$target_scope_file"
+  TARGET_SCOPE_SHA256="$target_scope_sha256"
+  DELEGATION_ARTIFACT_REVISION="$delegation_artifact_revision"
+  DELEGATION_TASK_FILE="$delegation_task_file"
 }
 
 read_adapter_failure_reason() {
   [[ -e "$ADAPTER_FAILURE_FILE" ]] || return 1
 
   local reason=""
-  reason="$(python "$SCRIPT_DIR/json_get.py" "$ADAPTER_FAILURE_FILE" failure_reason)" || return 2
+  local failure_vars=""
+  failure_vars="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$ADAPTER_FAILURE_FILE" failure_reason)" || return 2
+  eval "$failure_vars"
+  reason="$failure_reason"
   case "$reason" in
     adapter_cli_unavailable|adapter_quota_exhausted|adapter_unavailable)
       printf '%s\n' "$reason"
@@ -145,9 +147,12 @@ read_adapter_failure_reason() {
 read_cli_provenance() {
   [[ -e "$CLI_PROVENANCE_FILE" ]] || return 0
 
-  CLI_COMMAND="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_command)" || return 1
-  CLI_PATH="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_path)" || return 1
-  CLI_VERSION="$(python "$SCRIPT_DIR/json_get.py" "$CLI_PROVENANCE_FILE" cli_version)" || return 1
+  local provenance_vars=""
+  provenance_vars="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$CLI_PROVENANCE_FILE" cli_command cli_path cli_version)" || return 1
+  eval "$provenance_vars"
+  CLI_COMMAND="$cli_command"
+  CLI_PATH="$cli_path"
+  CLI_VERSION="$cli_version"
   [[ -n "$CLI_COMMAND" && -n "$CLI_PATH" ]] || return 1
 }
 
@@ -189,17 +194,14 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
     fail_run "${PREFLIGHT_REASON:-target_preflight_failed}"
   fi
 
-  TARGET_NAME="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" target_name)" \
-    || fail_run "target_preflight_result_invalid"
-  TARGET_REPO="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" target_repo)" \
-    || fail_run "target_preflight_result_invalid"
-  TARGET_BASE_BRANCH="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" base_branch)" \
-    || fail_run "target_preflight_result_invalid"
-  TARGET_BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" base_sha)" \
-    || fail_run "target_preflight_result_invalid"
+  PREFLIGHT_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$TARGET_PREFLIGHT_JSON" target_name target_repo base_branch base_sha remote_url)" || fail_run "target_preflight_result_invalid"
+  eval "$PREFLIGHT_VARS"
+  TARGET_NAME="$target_name"
+  TARGET_REPO="$target_repo"
+  TARGET_BASE_BRANCH="$base_branch"
+  TARGET_BASE_SHA="$base_sha"
   DELEGATION_TARGET_BASE_SHA="$TARGET_BASE_SHA"
-  TARGET_REMOTE_URL="$(python "$SCRIPT_DIR/json_get.py" "$TARGET_PREFLIGHT_JSON" remote_url)" \
-    || fail_run "target_preflight_result_invalid"
+  TARGET_REMOTE_URL="$remote_url"
   BASE_SHA="$TARGET_BASE_SHA"
   WORKTREE_REPO="$TARGET_REPO"
 else

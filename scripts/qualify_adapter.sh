@@ -121,7 +121,7 @@ while IFS=$'\t' read -r _ _ path; do
   fi
 done < <(git apply --numstat "$PATCH")
 
-BASE_SHA="$(python "$SCRIPT_DIR/json_get.py" "$RUN_DIR/record.json" base_sha)"
+BASE_SHA="$(json_value "$RUN_DIR/record.json" base_sha)"
 if ! VERIFY_WT="$(
   python "$SCRIPT_DIR/verifier_worktree.py" create-detached \
     --repo-root "$ROOT" \
