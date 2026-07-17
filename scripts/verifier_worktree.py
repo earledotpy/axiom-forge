@@ -76,7 +76,7 @@ def apply_patch(worktree, patch):
 
 
 def changed_paths_after_apply(worktree):
-    completed = subprocess.run(
+    completed = subprocess_execution.run(
         ["git", "-C", str(worktree), "diff", "--name-status", "-M", "--no-ext-diff"],
         text=True,
         capture_output=True,

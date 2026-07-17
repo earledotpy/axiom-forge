@@ -2,7 +2,6 @@
 """Run a command with a valid null standard input on Windows."""
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 

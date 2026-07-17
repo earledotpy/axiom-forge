@@ -17,7 +17,7 @@ class Completed:
 class RunWithDevnullTests(unittest.TestCase):
     def test_runs_command_with_devnull_stdin(self):
         with mock.patch.object(
-            run_with_devnull.subprocess,
+            run_with_devnull.subprocess_execution.subprocess,
             "run",
             return_value=Completed(17),
         ) as run:
