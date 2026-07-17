@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from forge.git import run_git
+from forge.small_helpers import load_json_object, require_nonempty_string
 from forge.committed_evidence import CommittedEvidenceError, read_committed_file
 
 
@@ -27,20 +28,11 @@ class PromotionReviewError(Exception):
 
 
 def load_json(path: Path, reason: str) -> dict:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        raise PromotionReviewError(reason)
-    if not isinstance(value, dict):
-        raise PromotionReviewError(reason)
-    return value
+    return load_json_object(path, error=PromotionReviewError(reason))
 
 
 def require_string(record: dict, key: str, reason: str) -> str:
-    value = record.get(key)
-    if not isinstance(value, str) or not value:
-        raise PromotionReviewError(reason)
-    return value
+    return require_nonempty_string(record, key, error=PromotionReviewError(reason))
 
 
 def review_path_for_run(run_id: str) -> PurePosixPath:

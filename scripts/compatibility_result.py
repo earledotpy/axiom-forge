@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+
+import sys
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.small_helpers import (
+    read_optional_json,
+    sha256_file as shared_sha256_file,
+    utc_now as shared_utc_now,
+)
 
 try:
     from adapter_identity import build_partial_identity_evidence
@@ -11,22 +20,15 @@ except ImportError:
 
 
 def read_json(path):
-    if not path or not Path(path).is_file():
-        return None
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return read_optional_json(path)
 
 
 def sha256_file(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return shared_sha256_file(path)
 
 
 def utc_now():
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return shared_utc_now()
 
 
 def build_result(

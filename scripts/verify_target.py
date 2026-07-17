@@ -3,8 +3,13 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.small_helpers import utc_now as shared_utc_now
 
 try:
     import tomllib
@@ -14,7 +19,7 @@ except ModuleNotFoundError:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return shared_utc_now()
 
 
 def main() -> int:

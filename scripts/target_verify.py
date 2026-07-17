@@ -5,21 +5,26 @@ import os
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from forge import subprocess_execution
+from forge.small_helpers import (
+    load_json_object,
+    require_nonempty_string,
+    utc_now as shared_utc_now,
+)
 
-from delegation_artifact_set import (
+from scripts.delegation_artifact_set import (
     DelegationArtifactSetError,
     committed_acceptance_artifact_from_record,
     validate_delegation_task_file as validate_delegation_task_path,
 )
-from target_preflight import PreflightFailure, is_inside, load_primary_target, normalize_path
+from scripts.target_preflight import PreflightFailure, is_inside, load_primary_target, normalize_path
 
 class TargetVerifyFailure(Exception):
     def __init__(self, reason: str):
@@ -28,24 +33,15 @@ class TargetVerifyFailure(Exception):
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return shared_utc_now()
 
 
 def load_record(path: Path) -> dict:
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        raise TargetVerifyFailure("target_record_malformed")
-    if not isinstance(record, dict):
-        raise TargetVerifyFailure("target_record_malformed")
-    return record
+    return load_json_object(path, error=TargetVerifyFailure("target_record_malformed"))
 
 
 def require_string(record: dict, key: str, reason: str) -> str:
-    value = record.get(key)
-    if not isinstance(value, str) or not value:
-        raise TargetVerifyFailure(reason)
-    return value
+    return require_nonempty_string(record, key, error=TargetVerifyFailure(reason))
 
 
 def configured_target_path(config_path: Path, target: dict) -> Path:
