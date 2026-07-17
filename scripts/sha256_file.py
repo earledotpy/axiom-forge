@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-import hashlib
 import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.small_helpers import sha256_file
 
 
 def main() -> int:
@@ -10,13 +15,7 @@ def main() -> int:
         return 2
 
     path = Path(sys.argv[1])
-    h = hashlib.sha256()
-
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-
-    print(h.hexdigest())
+    print(sha256_file(path))
     return 0
 
 

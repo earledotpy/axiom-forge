@@ -3,6 +3,12 @@ import argparse
 import json
 import re
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from forge.small_helpers import read_optional_json
 
 try:
     from concurrent_task_scopes import (
@@ -26,10 +32,8 @@ SCOPE_CONFLICT_REASONS = {"concurrent_task_scope_conflict", "patch_outside_targe
 
 
 def load_json(path: Path) -> dict | None:
-    if not path.exists():
-        return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = read_optional_json(path)
     except Exception:
         return None
     return value if isinstance(value, dict) else None

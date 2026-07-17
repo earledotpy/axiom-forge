@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from forge.committed_evidence import CommittedEvidenceError, read_committed_file
+from forge.small_helpers import sha256_file as shared_sha256_file
 
 try:
     from target_task_scope import TargetTaskScopeError, load_scope_sidecar
@@ -169,13 +170,7 @@ def load_delegation_ready_artifact_set(task_file: Path) -> DelegationArtifactSet
 
 
 def _sha256_file(path: Path) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return shared_sha256_file(path)
 
 
 def _repo_relative(path: Path, root: Path) -> str:
