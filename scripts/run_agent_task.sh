@@ -96,7 +96,10 @@ write_record() {
     --field delegation_artifact_revision "$DELEGATION_ARTIFACT_REVISION" \
     --field delegation_target_base_sha "$DELEGATION_TARGET_BASE_SHA" \
     --field delegation_task_file "$DELEGATION_TASK_FILE" \
-    --field failure_reason "$reason")" || return 1
+    --field failure_reason "$reason")" || {
+    printf '%s\n' "$record_json"
+    return 1
+  }
 
   record="$(python "$SCRIPT_DIR/run_record.py" build <<<"$record_json")" || {
     printf '%s\n' "$record"

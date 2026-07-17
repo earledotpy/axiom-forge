@@ -239,12 +239,14 @@ def supersession_reason(record):
 
 def build_from_stdin():
     import sys
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     try:
         payload = json.load(sys.stdin)
         if not isinstance(payload, dict):
             raise TypeError
         record = build_record(**payload)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
         print("invalid_run_record_payload")
         return 1
     print(json.dumps(record, indent=2))
