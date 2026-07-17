@@ -4,6 +4,13 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge import subprocess_execution
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,7 +24,12 @@ def main(argv: list[str] | None = None) -> int:
 
     environment = dict(os.environ)
     environment["AXIOM_FORGE_NORMALIZED_STDIN"] = "1"
-    result = subprocess.run(command, stdin=subprocess.DEVNULL, check=False, env=environment)
+    result = subprocess_execution.run(
+        command,
+        stdin_mode="devnull",
+        check=False,
+        env=environment,
+    )
     return result.returncode
 
 
