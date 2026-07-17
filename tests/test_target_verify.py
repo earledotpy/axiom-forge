@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -17,6 +19,29 @@ class Completed:
 
 
 class TargetVerifyTests(unittest.TestCase):
+    def test_validate_context_emits_sorted_json_on_success(self):
+        output = StringIO()
+        with mock.patch.object(
+            target_verify,
+            "validate_context",
+            return_value={"repo_root": "/tmp/target", "base_sha": "abc123"},
+        ):
+            with redirect_stdout(output):
+                result = target_verify.main(
+                    [
+                        "validate-context",
+                        "--record",
+                        "record.json",
+                        "--config",
+                        "gate.toml",
+                        "--forge-root",
+                        ".",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue(), '{"base_sha": "abc123", "repo_root": "/tmp/target"}\n')
+
     def test_verification_check_does_not_inherit_stdin(self):
         with mock.patch.object(target_verify.subprocess, "run", return_value=Completed()) as run:
             check, reason = target_verify.run_check(

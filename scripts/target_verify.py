@@ -312,8 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         except TargetVerifyFailure as exc:
             print(exc.reason)
             return 1
-        print(f"repo_root={context['repo_root']}")
-        print(f"base_sha={context['base_sha']}")
+        print(json.dumps(context, sort_keys=True))
         return 0
 
     if args.command == "run":

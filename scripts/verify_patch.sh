@@ -61,8 +61,13 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
       --forge-root "$ROOT"
   )" || die "$TARGET_CONTEXT"
 
-  REPO_ROOT="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
-  BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
+  if ! TARGET_CONTEXT_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract \
+    --json "$TARGET_CONTEXT" repo_root base_sha)"; then
+    die "$TARGET_CONTEXT_VARS"
+  fi
+  eval "$TARGET_CONTEXT_VARS"
+  REPO_ROOT="$repo_root"
+  BASE_SHA="$base_sha"
   VERIFY_MODE="target"
   TARGET_SCOPE_PATH="$RUN_DIR/allowed-paths.txt"
 fi
