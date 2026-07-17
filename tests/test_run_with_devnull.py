@@ -1,4 +1,3 @@
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -17,7 +16,7 @@ class Completed:
 class RunWithDevnullTests(unittest.TestCase):
     def test_runs_command_with_devnull_stdin(self):
         with mock.patch.object(
-            run_with_devnull.subprocess_execution.subprocess,
+            run_with_devnull.subprocess_execution,
             "run",
             return_value=Completed(17),
         ) as run:
@@ -25,7 +24,7 @@ class RunWithDevnullTests(unittest.TestCase):
 
         self.assertEqual(result, 17)
         self.assertEqual(run.call_args.args[0], [sys.executable, "child.py"])
-        self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(run.call_args.kwargs["stdin_mode"], "devnull")
         self.assertFalse(run.call_args.kwargs["check"])
         self.assertEqual(run.call_args.kwargs["env"]["AXIOM_FORGE_NORMALIZED_STDIN"], "1")
 

@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,8 +30,6 @@ class SubprocessExecutionTests(unittest.TestCase):
 
 
     def test_run_devnull_stdin_gives_real_child_an_empty_readable_stdin(self):
-        import sys
-
         result = subprocess_execution.run(
             [sys.executable, "-c", "import sys; sys.exit(0 if sys.stdin.read() == '' else 3)"],
             stdin_mode="devnull",
