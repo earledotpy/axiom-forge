@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.small_helpers import (
+    sha256_file as shared_sha256_file,
+)
 
 
 @dataclass(frozen=True)
@@ -44,7 +52,7 @@ class QualificationCaseError(Exception):
 
 
 def sha256_file(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return shared_sha256_file(path)
 
 
 def load_case(root, name):

@@ -6,6 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge.small_helpers import read_optional_json
+
 
 IDENTITY_FIELDS = (
     "adapter_script",
@@ -57,9 +63,7 @@ def capture_cli_provenance(cli_command):
 
 
 def read_json(path):
-    if not path or not Path(path).is_file():
-        return None
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return read_optional_json(path)
 
 
 def require_adapter_configuration(configuration):

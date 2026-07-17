@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from forge.git import run_git
+from forge.small_helpers import require_nonempty_string
 
 try:
     import tomllib
@@ -36,10 +37,7 @@ def is_inside(child: Path, parent: Path) -> bool:
 
 
 def require_string(config: dict, key: str) -> str:
-    value = config.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise PreflightFailure("target_config_malformed")
-    return value
+    return require_nonempty_string(config, key, error=PreflightFailure("target_config_malformed"), strip=True)
 
 
 def require_verify_config(config: dict) -> tuple[list[str], int]:
