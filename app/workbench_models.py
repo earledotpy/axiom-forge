@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+DEFAULT_ADAPTERS = [
+    "codex",
+    "claude-code",
+    "copilot",
+    "opencode",
+    "cursor",
+    "kiro",
+    "qoder",
+    "kilo",
+    "antigravity",
+]
+
+
+@dataclass(frozen=True)
+class IssueReference:
+    number: int
+    repo: str | None = None
+
+
+@dataclass(frozen=True)
+class IssueContext:
+    number: int
+    title: str
+    body: str
+    url: str
+    repo: str | None = None
+
+
+@dataclass(frozen=True)
+class DraftTaskPreview:
+    authority: str
+    source_issue: IssueContext
+    task_intent: str
+    task_text: str
+    target_scope: str
+    acceptance_check: str
+    draft_adapter: str
+    adapter_options: list[str]
+
+
+@dataclass(frozen=True)
+class ApprovedDelegation:
+    authority: str
+    issue_number: int
+    task_file: str
+    scope_file: str
+    acceptance_file: str
+    adapter: str
+    delegation_artifact_revision: str
+
+
+class WorkbenchApprovalError(ValueError):
+    pass
+
+
+class WorkbenchExecutionError(ValueError):
+    pass
+
+
+class WorkbenchVerificationError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class OperatorEvidenceSummary:
+    authority: str
+    run_id: str
+    task_intent: str
+    approved_scope: list[str]
+    adapter: str
+    run_status: str
+    changed_paths: list[str]
+    verification_result: str
+    verification_reason: str | None
+    acceptance_result: str
+    failure_reason: str | None
+    next_allowed_actions: list[str]
+
+
+@dataclass(frozen=True)
+class HistoricalCapturedRun:
+    authority: str
+    run_id: str
+    state: str
+    verification_state: str
+    read_only: bool
+    summary: OperatorEvidenceSummary | None
+    evidence_error: str | None
+
+@dataclass(frozen=True)
+class OperatorEvidenceDetails:
+    run_id: str
+    stdout: str
+    stderr: str
+    patch_diff: str
+
+@dataclass(frozen=True)
+class CapturedRun:
+    authority: str
+    run_id: str
+    run_status: str
+    failure_reason: str | None
+
+
+@dataclass(frozen=True)
+class ConfirmedExecution:
+    task_file: str
+
+
+@dataclass(frozen=True)
+class ConfirmedRetry:
+    run_id: str
+    adapter: str
+
+
+VerificationRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
+IssueFetcher = Callable[[IssueReference], IssueContext]
+TargetRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
