@@ -1,0 +1,3 @@
+# Forbid mid-run steering of executing delegations
+
+The workbench will stream an executing delegation's output live (cockpit stage 2), and every CLI vendor pushes interactive supervision, so the obvious next step would be letting the operator answer or redirect the executing agent mid-run. We forbid this permanently: the live run stream is display-only, the captured run directory written by the runner remains the sole evidence, and the evidence wins over the stream on any disagreement. Mid-run whispers would make the run no longer a function of its committed delegation artifacts, destroying the reproducibility claim that captured runs are built on; correction happens by letting the run finish or fail, then retrying through a new approved delegation.

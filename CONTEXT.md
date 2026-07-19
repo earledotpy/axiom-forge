@@ -104,6 +104,30 @@ _Avoid_: Forge health check, adapter qualification acceptance
 The operator-approved target repository base SHA that a delegation-ready task is intended to modify. The UI may propose it from the configured target branch and warn if it becomes stale before delegation; promotion treats a stale target base as a fail-closed blocker resolved by rerunning from a newly approved base, not by silently rebasing the captured patch. It is distinct from the delegation artifact revision, which identifies the Forge commit containing the approved task, scope, and acceptance check.
 _Avoid_: Forge revision, latest target branch, implicit base
 
+**Planning session**:
+An interactive chat session with a CLI agent, hosted in the workbench, used to turn planning source material into proposed bounded patch tasks. It may read the target repository and Forge evidence and run non-mutating investigation commands in a disposable worktree; it can change nothing durable. Its proposals become real only through the existing operator approval flow. Multiple planning sessions may run concurrently; the one-active-delegation limit applies to delegations, not sessions. A session may start free-form or from a GitHub issue, but approving a draft into delegation artifacts requires an anchoring issue, which the workbench may create at approval time.
+_Avoid_: execution session, autonomous agent, terminal replacement
+
+**Planning session boundary**:
+The invariant that a planning session can learn anything but change nothing durable: reads and non-mutating commands in a disposable worktree are allowed; file writes, mutating commands, and any effect outside the worktree are not. Execution remains separately caged under the task-to-captured-run workflow.
+_Avoid_: unrestrained session, vendor sandbox trust, execution boundary
+
+**Operator decision queue**:
+The workbench home view: every item currently awaiting operator judgment — drafts awaiting approval, runs awaiting verification, verified patches awaiting promotion review, promotion-ready patches awaiting promotion — ordered by pipeline stage. Sessions, streams, and evidence are reachable from the queue item they relate to. Nothing awaiting a decision may be invisible.
+_Avoid_: chat-first home, kanban flow board, dashboard-only summary
+
+**Draft proposal**:
+A machine-readable draft (task text, target scope, acceptance check, suggested adapter) emitted by a planning session's agent to pre-fill the approval form. It is a suggestion with no authority: the operator edits and approves, the committed artifacts are what was approved, and the proposal is preserved in the session transcript as provenance.
+_Avoid_: agent-filed delegation, auto-approved draft, copy-paste handoff
+
+**Live run stream**:
+The workbench's real-time display of an executing delegation's output. It is a window, not a source: the captured run directory written by the runner remains the sole evidence, and the evidence wins over the stream on any disagreement. Mid-run operator steering of an executing agent is forbidden; correction happens by letting the run finish or fail, then retrying through a new approved delegation.
+_Avoid_: interactive execution, mid-run steering, streamed evidence
+
+**Planning session transcript**:
+The Forge-owned capture of one planning session's conversation. It is stored like run evidence rather than committed, and when a draft from that session is approved, the delegation artifacts record which session produced them. Transcripts of sessions that led nowhere remain uncommitted scratch.
+_Avoid_: committed chat log, ephemeral chat, audit-free planning
+
 **Target task scope**:
 The operator-controlled list of external target repository paths a target-mode captured run may modify. A target-mode patch outside this list fails closed before target promotion.
 _Avoid_: implied target scope, broad target task
