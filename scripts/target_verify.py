@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import sys
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from forge import subprocess_execution
 from forge.small_helpers import (
     load_json_object,
     require_nonempty_string,
@@ -155,10 +157,10 @@ def run_check(command, *, cwd: Path, timeout: int) -> tuple[dict, str | None]:
         "stderr": "",
     }
     try:
-        completed = subprocess.run(
+        completed = subprocess_execution.run(
             command,
             cwd=cwd,
-            stdin=subprocess.DEVNULL,
+            stdin_mode="devnull",
             text=True,
             capture_output=True,
             timeout=timeout,
@@ -194,16 +196,16 @@ def run_acceptance_check(artifact: dict, *, worktree: Path, timeout: int) -> tup
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".accept.sh", delete=False) as handle:
             handle.write(artifact["content"])
             script_path = Path(handle.name)
-        command_kwargs = {
-            "cwd": worktree,
-            "text": True,
-            "capture_output": True,
-            "timeout": timeout,
-            "check": False,
-        }
-        if os.environ.get("AXIOM_FORGE_NORMALIZED_STDIN") != "1":
-            command_kwargs["stdin"] = subprocess.DEVNULL
-        completed = subprocess.run(["bash", str(script_path)], **command_kwargs)
+        stdin_mode = "inherit" if os.environ.get("AXIOM_FORGE_NORMALIZED_STDIN") == "1" else "devnull"
+        completed = subprocess_execution.run(
+            ["bash", str(script_path)],
+            cwd=worktree,
+            stdin_mode=stdin_mode,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
         check["returncode"] = completed.returncode
         check["stdout"] = completed.stdout
         check["stderr"] = completed.stderr

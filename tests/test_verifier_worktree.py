@@ -51,6 +51,21 @@ class VerifierWorktreeTests(unittest.TestCase):
             ],
         )
 
+    def test_changed_paths_after_apply_routes_through_subprocess_execution(self):
+        completed = mock.Mock(returncode=0, stdout="M\tapp/x.py\n")
+
+        with mock.patch.object(verifier_worktree.subprocess_execution, "run", return_value=completed) as run:
+            changed = verifier_worktree.changed_paths_after_apply(Path("worktree"))
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "-C", "worktree", "diff", "--name-status", "-M", "--no-ext-diff"],
+        )
+        self.assertTrue(run.call_args.kwargs["text"])
+        self.assertTrue(run.call_args.kwargs["capture_output"])
+        self.assertFalse(run.call_args.kwargs["check"])
+        self.assertEqual([(path.status, path.path) for path in changed], [("M", "app/x.py")])
+
     def test_patch_check_failure_stops_before_apply(self):
         calls = []
 

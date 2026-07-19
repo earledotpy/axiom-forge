@@ -5,6 +5,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from forge import subprocess_execution
+
 try:
     from target_task_scope import ChangedPath, TargetTaskScopeError, check_changed_paths_allowed, load_scope_sidecar
 except ModuleNotFoundError:
@@ -25,7 +31,7 @@ class VerifierError(Exception):
 
 
 def run_command(command, *, cwd=None, stdout=None, stderr=None):
-    return subprocess.run(command, cwd=cwd, stdout=stdout, stderr=stderr)
+    return subprocess_execution.run(command, cwd=cwd, stdout=stdout, stderr=stderr)
 
 
 def create_detached_worktree(repo_root, base_sha):
@@ -70,7 +76,7 @@ def apply_patch(worktree, patch):
 
 
 def changed_paths_after_apply(worktree):
-    completed = subprocess.run(
+    completed = subprocess_execution.run(
         ["git", "-C", str(worktree), "diff", "--name-status", "-M", "--no-ext-diff"],
         text=True,
         capture_output=True,
