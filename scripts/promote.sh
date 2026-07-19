@@ -74,8 +74,13 @@ if [[ "$TARGET_MODE" -eq 1 ]]; then
       --forge-root "$ROOT"
   )" || die "$TARGET_CONTEXT"
 
-  TARGET_REPO="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^repo_root=//p')"
-  BASE_SHA="$(printf '%s\n' "$TARGET_CONTEXT" | sed -n 's/^base_sha=//p')"
+  if ! TARGET_CONTEXT_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract \
+    --json "$TARGET_CONTEXT" repo_root base_sha)"; then
+    die "$TARGET_CONTEXT_VARS"
+  fi
+  eval "$TARGET_CONTEXT_VARS"
+  TARGET_REPO="$repo_root"
+  BASE_SHA="$base_sha"
   DELEGATION_TARGET_BASE_SHA="$BASE_SHA"
   PROMOTION_REPO="$TARGET_REPO"
   VERIFY_FLAG=(--target)
