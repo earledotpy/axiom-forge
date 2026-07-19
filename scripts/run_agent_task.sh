@@ -71,33 +71,42 @@ cp "$TASK_FILE" "$RUN_DIR/task.md"
 write_record() {
   local status="$1"
   local reason="${2:-}"
+  local record_json=""
+  local record=""
 
-  python "$SCRIPT_DIR/write_run_record.py" \
-    --file "$RUN_DIR/record.json" \
-    --run-id "$RUN_ID" \
-    --agent "$AGENT_NAME" \
-    --base-sha "$BASE_SHA" \
-    --status "$status" \
-    --task-file "task.md" \
-    --patch-file "$([[ -s "$RUN_DIR/patch.diff" ]] && echo "patch.diff" || true)" \
-    --patch-sha256 "$PATCH_SHA" \
-    --cli-command "$CLI_COMMAND" \
-    --cli-path "$CLI_PATH" \
-    --cli-version "$CLI_VERSION" \
-    --run-mode "$RUN_MODE" \
-    --target-repo "$TARGET_REPO" \
-    --target-name "$TARGET_NAME" \
-    --target-base-branch "$TARGET_BASE_BRANCH" \
-    --target-base-sha "$TARGET_BASE_SHA" \
-    --target-remote-url "$TARGET_REMOTE_URL" \
-    --target-scope-file "$TARGET_SCOPE_FILE" \
-    --target-scope-sha256 "$TARGET_SCOPE_SHA256" \
-    --delegation-artifact-revision "$DELEGATION_ARTIFACT_REVISION" \
-    --delegation-target-base-sha "$DELEGATION_TARGET_BASE_SHA" \
-    --delegation-task-file "$DELEGATION_TASK_FILE" \
-    --failure-reason "$reason"
+  record_json="$(python "$SCRIPT_DIR/json_shell_vars.py" build \
+    --field run_id "$RUN_ID" \
+    --field agent "$AGENT_NAME" \
+    --field base_sha "$BASE_SHA" \
+    --field status "$status" \
+    --field task_file "task.md" \
+    --field patch_file "$([[ -s "$RUN_DIR/patch.diff" ]] && echo "patch.diff" || true)" \
+    --field patch_sha256 "$PATCH_SHA" \
+    --field cli_command "$CLI_COMMAND" \
+    --field cli_path "$CLI_PATH" \
+    --field cli_version "$CLI_VERSION" \
+    --field run_mode "$RUN_MODE" \
+    --field target_repo "$TARGET_REPO" \
+    --field target_name "$TARGET_NAME" \
+    --field target_base_branch "$TARGET_BASE_BRANCH" \
+    --field target_base_sha "$TARGET_BASE_SHA" \
+    --field target_remote_url "$TARGET_REMOTE_URL" \
+    --field target_scope_file "$TARGET_SCOPE_FILE" \
+    --field target_scope_sha256 "$TARGET_SCOPE_SHA256" \
+    --field delegation_artifact_revision "$DELEGATION_ARTIFACT_REVISION" \
+    --field delegation_target_base_sha "$DELEGATION_TARGET_BASE_SHA" \
+    --field delegation_task_file "$DELEGATION_TASK_FILE" \
+    --field failure_reason "$reason")" || {
+    printf '%s\n' "$record_json"
+    return 1
+  }
+
+  record="$(python "$SCRIPT_DIR/run_record.py" build <<<"$record_json")" || {
+    printf '%s\n' "$record"
+    return 1
+  }
+  printf '%s\n' "$record" > "$RUN_DIR/record.json"
 }
-
 
 
 prepare_target_run_artifacts() {

@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +9,90 @@ from scripts import run_record
 
 
 class RunRecordTests(unittest.TestCase):
+    def test_build_command_writes_a_record_from_one_stdin_json_payload(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parents[1] / "scripts" / "run_record.py"), "build"],
+            input=json.dumps(
+                {
+                    "run_id": "run-1",
+                    "agent": "agent",
+                    "base_sha": "abc123",
+                    "status": "COMPLETED",
+                    "cli_command": "python",
+                }
+            ),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        record = json.loads(result.stdout)
+        self.assertEqual(record["run_id"], "run-1")
+        self.assertEqual(record["cli_command"], "python")
+        self.assertEqual(record["target_repo"], ".")
+        self.assertIsNone(record["failure_reason"])
+
+    def test_build_command_fails_with_one_reason_for_invalid_stdin_json(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parents[1] / "scripts" / "run_record.py"), "build"],
+            input="not json",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (1, "invalid_run_record_payload\n", ""),
+        )
+
+    def test_build_command_decodes_stdin_as_utf8_regardless_of_locale(self):
+        import os
+
+        payload = json.dumps(
+            {
+                "run_id": "run-1",
+                "agent": "agent",
+                "base_sha": "abc123",
+                "status": "FAILED",
+                "failure_reason": "café",
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parents[1] / "scripts" / "run_record.py"), "build"],
+            input=payload,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+        )
+
+        self.assertEqual(result.returncode, 0)
+        record = json.loads(result.stdout.decode("utf-8"))
+        self.assertEqual(record["failure_reason"], "café")
+
+    def test_build_command_fails_closed_on_non_utf8_stdin(self):
+        payload = (
+            b'{"run_id": "run-1", "agent": "agent", "base_sha": "abc123",'
+            b' "status": "FAILED", "failure_reason": "caf\xe9"}'
+        )
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parents[1] / "scripts" / "run_record.py"), "build"],
+            input=payload,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(
+            (
+                result.returncode,
+                result.stdout.decode("utf-8").replace("\r\n", "\n"),
+                result.stderr,
+            ),
+            (1, "invalid_run_record_payload\n", b""),
+        )
+
     def test_write_record_uses_strict_schema_and_current_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "record.json"
