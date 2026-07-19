@@ -21,6 +21,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/draft":
                 self._handle_draft(parsed.query)
                 return
+            if parsed.path == "/api/decision-queue":
+                self._handle_decision_queue()
+                return
             if parsed.path == "/api/runs":
                 self._handle_history()
                 return
@@ -96,6 +99,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
 
             self._write_json(asdict(captured_run), HTTPStatus.CREATED)
+
+        def _handle_decision_queue(self) -> None:
+            self._write_json(asdict(workbench.operator_decision_queue()))
 
         def _handle_history(self) -> None:
             self._write_json(

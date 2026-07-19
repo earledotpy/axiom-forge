@@ -19,7 +19,8 @@ from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 from app.workbench_drafts import issue_to_draft_preview, parse_issue_reference
 from app.workbench_models import (
     DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
-    DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorEvidenceDetails,
+    DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorDecisionQueue,
+    OperatorDecisionQueueItem, OperatorDecisionQueueStage, OperatorEvidenceDetails,
     OperatorEvidenceSummary, TargetRunner, VerificationRunner, WorkbenchApprovalError,
     WorkbenchExecutionError, WorkbenchVerificationError,
 )
@@ -39,7 +40,7 @@ class WorkbenchServer:
         self._target_runner = target_runner or _run_target_mode_runner
         self._verification_runner = verification_runner or _run_target_mode_verifier
         self._active_delegation_lock = Lock()
-        self._active_delegation = False
+        self._active_delegation: tuple[str, str] | None = None
 
     def preview_for_issue(self, raw_reference: str) -> DraftTaskPreview:
         reference = parse_issue_reference(raw_reference, default_repo=self.default_repo)
@@ -109,14 +110,14 @@ class WorkbenchServer:
         with self._active_delegation_lock:
             if self._active_delegation:
                 raise WorkbenchExecutionError("active_workbench_delegation_in_progress")
-            self._active_delegation = True
+            self._active_delegation = (task_file, adapter)
         try:
             result = self._target_runner(command, self.forge_root)
         except OSError as error:
             raise WorkbenchExecutionError("target_mode_runner_start_failed") from error
         finally:
             with self._active_delegation_lock:
-                self._active_delegation = False
+                self._active_delegation = None
 
         return _captured_run_from_runner_result(self.forge_root, result)
 
@@ -153,6 +154,67 @@ class WorkbenchServer:
             for run_dir in sorted(runs_root.iterdir(), key=lambda path: path.name, reverse=True)
             if run_dir.is_dir() and _is_captured_run_id(run_dir.name)
         ]
+
+    def operator_decision_queue(self) -> OperatorDecisionQueue:
+        history = self.historical_captured_runs()
+        with self._active_delegation_lock:
+            active_delegation = self._active_delegation
+
+        active_task_file = active_delegation[0] if active_delegation else None
+        represented_task_files = {
+            task_file
+            for run in history
+            if run.state != "superseded"
+            for task_file in [_delegation_task_file(self.forge_root, run.run_id)]
+            if task_file is not None
+        }
+        awaiting_execution = [
+            _awaiting_execution_queue_item(self.forge_root, task_file)
+            for task_file in _delegation_ready_task_files(self.forge_root)
+            if task_file not in represented_task_files and task_file != active_task_file
+        ]
+        executing = (
+            [_executing_queue_item(*active_delegation)]
+            if active_delegation is not None
+            else []
+        )
+        awaiting_verification: list[OperatorDecisionQueueItem] = []
+        awaiting_promotion_review: list[OperatorDecisionQueueItem] = []
+        retry_decision: list[OperatorDecisionQueueItem] = []
+        evidence_problems: list[OperatorDecisionQueueItem] = []
+
+        for run in history:
+            if run.state == "superseded":
+                continue
+            if run.summary is None:
+                evidence_problems.append(_evidence_problem_queue_item(run))
+                continue
+            summary = run.summary
+            task_file = _delegation_task_file(self.forge_root, run.run_id)
+            if summary.run_status not in {"COMPLETED", "FAILED"}:
+                evidence_problems.append(_invalid_evidence_queue_item(run))
+            elif summary.run_status == "FAILED" or summary.verification_result == "FAIL":
+                retry_decision.append(_retry_queue_item(summary, task_file))
+            elif summary.verification_result == "NOT_RUN":
+                awaiting_verification.append(_verification_queue_item(summary, task_file))
+            elif summary.verification_result == "PASS":
+                awaiting_promotion_review.append(_promotion_review_queue_item(summary, task_file))
+
+        return OperatorDecisionQueue(
+            authority="operator_decision_queue",
+            stages=[
+                OperatorDecisionQueueStage("awaiting_execution", "Awaiting execution", awaiting_execution),
+                OperatorDecisionQueueStage("executing", "Executing", executing),
+                OperatorDecisionQueueStage("awaiting_verification", "Awaiting verification", awaiting_verification),
+                OperatorDecisionQueueStage(
+                    "awaiting_promotion_review",
+                    "Verified, awaiting promotion review",
+                    awaiting_promotion_review,
+                ),
+                OperatorDecisionQueueStage("retry_decision", "Retry decision", retry_decision),
+                OperatorDecisionQueueStage("evidence_problems", "Evidence problems", evidence_problems),
+            ],
+        )
 
     def evidence_details_for_captured_run(self, run_id: str) -> OperatorEvidenceDetails:
         run_dir = _captured_run_directory(self.forge_root, run_id)
@@ -411,6 +473,171 @@ def _historical_captured_run(forge_root: Path, run_dir: Path) -> HistoricalCaptu
         read_only=True,
         summary=_summary_from_evidence(evidence, run_dir),
         evidence_error=None,
+    )
+
+
+def _delegation_ready_task_files(forge_root: Path) -> list[str]:
+    tasks_root = forge_root / "tasks"
+    if not tasks_root.is_dir():
+        return []
+    ready_task_files = []
+    for task_path in sorted(tasks_root.rglob("*.task.md")):
+        try:
+            artifact_set = load_task_artifact_set(task_path)
+            task_file = task_path.relative_to(forge_root).as_posix()
+        except (DelegationArtifactSetError, ValueError):
+            continue
+        if artifact_set.state == "delegation-ready" and artifact_set.approved_adapter:
+            ready_task_files.append(task_file)
+    return ready_task_files
+
+
+def _delegation_task_file(forge_root: Path, run_id: str) -> str | None:
+    record = _evidence_json(forge_root / "runs" / run_id / "record.json")
+    task_file = record.get("delegation_task_file")
+    return task_file if isinstance(task_file, str) else None
+
+
+def _awaiting_execution_queue_item(forge_root: Path, task_file: str) -> OperatorDecisionQueueItem:
+    artifact_set = load_task_artifact_set(forge_root / task_file)
+    adapter = artifact_set.approved_adapter or "missing_adapter"
+    return OperatorDecisionQueueItem(
+        stage="awaiting_execution",
+        decision_label="Execute approved delegation",
+        evidence_line=f"{task_file} · {adapter} · delegation-ready",
+        action_label="Execute →",
+        action="execute",
+        run_id=None,
+        task_file=task_file,
+        adapter=adapter,
+        run_status=None,
+        verification_result=None,
+        acceptance_result=None,
+        changed_paths=[],
+        failure_reason=None,
+        evidence_error=None,
+    )
+
+
+def _executing_queue_item(task_file: str, adapter: str) -> OperatorDecisionQueueItem:
+    return OperatorDecisionQueueItem(
+        stage="executing",
+        decision_label="Delegation is executing",
+        evidence_line=f"{task_file} · {adapter} · executing",
+        action_label=None,
+        action=None,
+        run_id=None,
+        task_file=task_file,
+        adapter=adapter,
+        run_status="EXECUTING",
+        verification_result=None,
+        acceptance_result=None,
+        changed_paths=[],
+        failure_reason=None,
+        evidence_error=None,
+    )
+
+
+def _run_queue_item(
+    summary: OperatorEvidenceSummary,
+    task_file: str | None,
+    *,
+    stage: str,
+    decision_label: str,
+    action_label: str,
+    action: str,
+) -> OperatorDecisionQueueItem:
+    fields = [summary.run_id, task_file or "missing_task_file", summary.adapter, summary.run_status]
+    if summary.verification_result:
+        fields.append(f"verification {summary.verification_result}")
+    if summary.failure_reason:
+        fields.append(summary.failure_reason)
+    return OperatorDecisionQueueItem(
+        stage=stage,
+        decision_label=decision_label,
+        evidence_line=" · ".join(fields),
+        action_label=action_label,
+        action=action,
+        run_id=summary.run_id,
+        task_file=task_file,
+        adapter=summary.adapter,
+        run_status=summary.run_status,
+        verification_result=summary.verification_result,
+        acceptance_result=summary.acceptance_result,
+        changed_paths=summary.changed_paths,
+        failure_reason=summary.failure_reason or summary.verification_reason,
+        evidence_error=None,
+    )
+
+
+def _verification_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+    return _run_queue_item(
+        summary,
+        task_file,
+        stage="awaiting_verification",
+        decision_label="Verify captured run",
+        action_label="Verify →",
+        action="verify",
+    )
+
+
+def _promotion_review_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+    return _run_queue_item(
+        summary,
+        task_file,
+        stage="awaiting_promotion_review",
+        decision_label="Prepare promotion review",
+        action_label="Prepare review →",
+        action="prepare_review",
+    )
+
+
+def _retry_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+    return _run_queue_item(
+        summary,
+        task_file,
+        stage="retry_decision",
+        decision_label="Choose retry or abandon",
+        action_label="Retry with… →",
+        action="retry",
+    )
+
+
+def _evidence_problem_queue_item(run: HistoricalCapturedRun) -> OperatorDecisionQueueItem:
+    return OperatorDecisionQueueItem(
+        stage="evidence_problems",
+        decision_label="Resolve evidence problem",
+        evidence_line=f"{run.run_id} · {run.evidence_error or 'evidence unavailable'}",
+        action_label="Inspect evidence →",
+        action="inspect_evidence",
+        run_id=run.run_id,
+        task_file=None,
+        adapter=None,
+        run_status=None,
+        verification_result=None,
+        acceptance_result=None,
+        changed_paths=[],
+        failure_reason=None,
+        evidence_error=run.evidence_error,
+    )
+
+
+def _invalid_evidence_queue_item(run: HistoricalCapturedRun) -> OperatorDecisionQueueItem:
+    return OperatorDecisionQueueItem(
+        stage="evidence_problems",
+        decision_label="Resolve evidence problem",
+        evidence_line=f"{run.run_id} · captured_run_record_invalid",
+        action_label="Inspect evidence →",
+        action="inspect_evidence",
+        run_id=run.run_id,
+        task_file=None,
+        adapter=run.summary.adapter if run.summary else None,
+        run_status=run.summary.run_status if run.summary else None,
+        verification_result=run.summary.verification_result if run.summary else None,
+        acceptance_result=run.summary.acceptance_result if run.summary else None,
+        changed_paths=run.summary.changed_paths if run.summary else [],
+        failure_reason=run.summary.failure_reason if run.summary else None,
+        evidence_error="captured_run_record_invalid",
     )
 
 
