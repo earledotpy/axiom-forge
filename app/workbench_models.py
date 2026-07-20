@@ -95,6 +95,37 @@ class HistoricalCapturedRun:
     evidence_error: str | None
 
 @dataclass(frozen=True)
+class OperatorDecisionQueueItem:
+    stage: str
+    decision_label: str
+    evidence_line: str
+    action_label: str | None
+    action: str | None
+    run_id: str | None
+    task_file: str | None
+    adapter: str | None
+    run_status: str | None
+    verification_result: str | None
+    acceptance_result: str | None
+    changed_paths: list[str]
+    failure_reason: str | None
+    evidence_error: str | None
+
+
+@dataclass(frozen=True)
+class OperatorDecisionQueueStage:
+    name: str
+    label: str
+    items: list[OperatorDecisionQueueItem]
+
+
+@dataclass(frozen=True)
+class OperatorDecisionQueue:
+    authority: str
+    stages: list[OperatorDecisionQueueStage]
+
+
+@dataclass(frozen=True)
 class OperatorEvidenceDetails:
     run_id: str
     stdout: str

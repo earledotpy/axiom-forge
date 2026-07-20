@@ -149,6 +149,20 @@ WORKBENCH_HTML = """<!doctype html>
       margin-top: 12px;
       overflow-wrap: anywhere;
     }
+    .queue-stage {
+      border-top: 1px solid var(--line);
+      padding: 18px 0;
+    }
+    .queue-stage h3 { font-size: 16px; margin: 0 0 10px; }
+    .queue-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #ffffff;
+      margin: 10px 0;
+      padding: 12px;
+    }
+    .queue-card .meta { font-family: Consolas, "Liberation Mono", monospace; margin-top: 6px; }
+    .queue-card button { margin-top: 10px; }
     @media (max-width: 820px) {
       main, .grid {
         display: block;
@@ -183,6 +197,15 @@ WORKBENCH_HTML = """<!doctype html>
       <div id="evidence-summary" class="hidden"></div>
     </aside>
     <section>
+      <div id="decision-queue">
+        <div class="issue">
+          <h2>Operator decision queue</h2>
+          <p class="meta">Nothing awaiting a decision is invisible. This queue is re-derived from Forge-owned delegation artifacts and captured evidence each time it loads.</p>
+          <button id="start-draft-button" type="button">Prepare a new task</button>
+        </div>
+        <div id="decision-queue-stages" class="meta">Loading operator decisions…</div>
+      </div>
+      <div id="draft-workflow" class="hidden">
       <div id="empty" class="meta">Load a GitHub Issue to prepare a draft task artifact.</div>
       <div id="preview" class="hidden">
         <div class="issue">
@@ -225,6 +248,7 @@ WORKBENCH_HTML = """<!doctype html>
           <div id="execution-result" class="approved hidden"></div>
         </div>
       </div>
+      </div>
     </section>
   </main>
   <script>
@@ -242,6 +266,10 @@ WORKBENCH_HTML = """<!doctype html>
     const runButton = document.querySelector("#run-button");
     const evidenceSummary = document.querySelector("#evidence-summary");
     const runHistory = document.querySelector("#run-history");
+    const decisionQueue = document.querySelector("#decision-queue");
+    const decisionQueueStages = document.querySelector("#decision-queue-stages");
+    const draftWorkflow = document.querySelector("#draft-workflow");
+    const startDraftButton = document.querySelector("#start-draft-button");
     const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
     let loadedIssue = null;
     let approvedDelegation = null;
@@ -267,6 +295,8 @@ WORKBENCH_HTML = """<!doctype html>
     });
 
     function renderPreview(payload) {
+      draftWorkflow.classList.remove("hidden");
+      decisionQueue.classList.add("hidden");
       const issue = payload.source_issue;
       loadedIssue = issue;
       approvalConfirmation.checked = false;
@@ -365,6 +395,7 @@ WORKBENCH_HTML = """<!doctype html>
         executionResult.classList.remove("hidden");
         await renderEvidenceSummary(payload.run_id);
         await renderHistoricalRuns();
+        await renderDecisionQueue();
       } catch (executionError) {
         error.textContent = executionError.message;
         error.classList.remove("hidden");
@@ -471,6 +502,7 @@ WORKBENCH_HTML = """<!doctype html>
             priorEvidence.append(priorEvidenceTitle, failedEvidenceSummary);
             evidenceSummary.prepend(priorEvidence);
             await renderHistoricalRuns();
+            await renderDecisionQueue();
           } catch (retryError) {
             error.textContent = retryError.message;
             error.classList.remove("hidden");
@@ -502,6 +534,103 @@ WORKBENCH_HTML = """<!doctype html>
       evidenceSummary.append(details);
       evidenceSummary.classList.remove("hidden");
     }
+    async function renderEvidenceDetails(runId) {
+      const response = await fetch(`/api/runs/${runId}/details`);
+      const raw = await response.json();
+      if (!response.ok) throw new Error(raw.error || "captured_run_evidence_unavailable");
+      evidenceSummary.replaceChildren();
+      const title = document.createElement("h3");
+      title.textContent = `Captured run evidence: ${runId}`;
+      evidenceSummary.append(title);
+      [["stdout", raw.stdout], ["stderr", raw.stderr], ["patch diff", raw.patch_diff]].forEach(([label, text]) => {
+        const heading = document.createElement("h4");
+        heading.textContent = label;
+        const pre = document.createElement("pre");
+        pre.textContent = text || "missing";
+        evidenceSummary.append(heading, pre);
+      });
+      evidenceSummary.classList.remove("hidden");
+    }
+    async function runQueueAction(item) {
+      error.classList.add("hidden");
+      try {
+        if (item.action === "execute") {
+          if (!window.confirm(`Start approved delegation ${item.task_file}?`)) return;
+          const response = await fetch("/api/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task_file: item.task_file, confirmed: true }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "target_mode_run_failed");
+          await renderEvidenceSummary(payload.run_id);
+        } else if (item.action === "verify") {
+          await renderEvidenceSummary(item.run_id, true);
+        } else if (item.action === "retry" || item.action === "prepare_review") {
+          await renderEvidenceSummary(item.run_id, false, item.action === "prepare_review");
+          evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (item.action === "inspect_evidence") {
+          await renderEvidenceDetails(item.run_id);
+          evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          throw new Error(item.evidence_error || "captured_run_evidence_unavailable");
+        }
+        await renderDecisionQueue();
+        await renderHistoricalRuns();
+      } catch (queueActionError) {
+        error.textContent = queueActionError.message;
+        error.classList.remove("hidden");
+      }
+    }
+
+    async function renderDecisionQueue() {
+      const response = await fetch("/api/decision-queue");
+      const payload = await response.json();
+      if (!response.ok) {
+        decisionQueueStages.textContent = payload.error || "operator_decision_queue_unavailable";
+        return;
+      }
+      decisionQueueStages.replaceChildren();
+      payload.stages.forEach((stage) => {
+        const section = document.createElement("section");
+        section.className = "queue-stage";
+        const heading = document.createElement("h3");
+        heading.textContent = `${stage.label} (${stage.items.length})`;
+        section.append(heading);
+        if (!stage.items.length) {
+          const emptyStage = document.createElement("p");
+          emptyStage.className = "meta";
+          emptyStage.textContent = `Nothing in ${stage.label.toLowerCase()}.`;
+          section.append(emptyStage);
+        }
+        stage.items.forEach((item) => {
+          const card = document.createElement("article");
+          card.className = "queue-card";
+          const decision = document.createElement("strong");
+          decision.textContent = item.decision_label;
+          const evidence = document.createElement("div");
+          evidence.className = "meta";
+          evidence.textContent = item.evidence_line;
+          card.append(decision, evidence);
+          if (item.action_label) {
+            const action = document.createElement("button");
+            action.type = "button";
+            action.textContent = item.action_label;
+            action.addEventListener("click", () => runQueueAction(item));
+            card.append(action);
+          }
+          section.append(card);
+        });
+        decisionQueueStages.append(section);
+      });
+    }
+
+    startDraftButton.addEventListener("click", () => {
+      draftWorkflow.classList.remove("hidden");
+      decisionQueue.classList.add("hidden");
+      document.querySelector("#issue-input").focus();
+    });
+
     async function renderHistoricalRuns() {
       const response = await fetch("/api/runs");
       const payload = await response.json();
@@ -545,6 +674,7 @@ WORKBENCH_HTML = """<!doctype html>
       });
       runHistory.append(list);
     }
+    renderDecisionQueue();
     renderHistoricalRuns();
   </script>
 </body>

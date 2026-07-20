@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import asdict
 import tempfile
 import unittest
 from http.server import ThreadingHTTPServer
@@ -936,6 +937,246 @@ class TestWorkbench(unittest.TestCase):
 
         self.assertEqual([entry.run_id for entry in first_history], [first_id])
         self.assertEqual([entry.run_id for entry in second_history], [second_id, first_id])
+
+    def test_operator_decision_queue_derives_every_stage_read_only(self):
+        awaiting_verification_id = '20260719-010203-000001'
+        awaiting_review_id = '20260719-010203-000002'
+        retry_id = '20260719-010203-000003'
+        superseded_id = '20260719-010203-000004'
+        evidence_problem_id = '20260719-010203-000005'
+        failed_verification_id = '20260719-010203-000006'
+        workbench, root = self.make_workbench()
+
+        for issue_number in (49, 50, 51, 52, 53):
+            workbench.approve_draft(self.approval_payload(issue_number=issue_number))
+
+        self.write_target_run_evidence(
+            root,
+            awaiting_verification_id,
+            {
+                'run_id': awaiting_verification_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-49.task.md',
+            },
+        )
+        review_run = self.write_target_run_evidence(
+            root,
+            awaiting_review_id,
+            {
+                'run_id': awaiting_review_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-50.task.md',
+            },
+        )
+        review_run.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+        self.write_target_run_evidence(
+            root,
+            retry_id,
+            {
+                'run_id': retry_id,
+                'run_status': 'FAILED',
+                'failure_reason': 'adapter_unavailable',
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-51.task.md',
+            },
+        )
+        self.write_target_run_evidence(
+            root,
+            superseded_id,
+            {
+                'run_id': superseded_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-51.task.md',
+                'superseded_by_run_id': retry_id,
+                'superseded_reason': 'newer_delegation_target_base',
+            },
+        )
+        failed_verification_run = self.write_target_run_evidence(
+            root,
+            failed_verification_id,
+            {
+                'run_id': failed_verification_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-53.task.md',
+            },
+        )
+        failed_verification_run.joinpath('verify.json').write_text(
+            json.dumps(
+                {
+                    'status': 'FAIL',
+                    'reason': 'target_acceptance_failed',
+                    'acceptance': {'returncode': 1},
+                }
+            ),
+            encoding='utf-8',
+        )
+        (root / 'runs' / evidence_problem_id).mkdir(parents=True)
+
+        status_before_queue = subprocess.check_output(
+            ['git', '-C', str(root), 'status', '--porcelain'], text=True
+        )
+        first_queue = workbench.operator_decision_queue()
+        second_queue = workbench.operator_decision_queue()
+
+        self.assertEqual(first_queue, second_queue)
+        self.assertEqual(first_queue.authority, 'operator_decision_queue')
+        stages = {stage.name: stage.items for stage in first_queue.stages}
+        self.assertEqual(
+            [stage.name for stage in first_queue.stages],
+            [
+                'awaiting_execution',
+                'executing',
+                'awaiting_verification',
+                'awaiting_promotion_review',
+                'retry_decision',
+                'evidence_problems',
+            ],
+        )
+        self.assertEqual([item.task_file for item in stages['awaiting_execution']], ['tasks/workbench-issue-52.task.md'])
+        self.assertEqual(stages['executing'], [])
+        self.assertEqual([item.run_id for item in stages['awaiting_verification']], [awaiting_verification_id])
+        self.assertEqual([item.task_file for item in stages['awaiting_verification']], ['tasks/workbench-issue-49.task.md'])
+        self.assertEqual([item.run_id for item in stages['awaiting_promotion_review']], [awaiting_review_id])
+        review_item = stages['awaiting_promotion_review'][0]
+        self.assertIn('acceptance PASS', review_item.evidence_line)
+        self.assertIn('changed paths app/widget.py', review_item.evidence_line)
+        self.assertEqual([item.run_id for item in stages['retry_decision']], [failed_verification_id, retry_id])
+        retry_items = {item.run_id: item for item in stages['retry_decision']}
+        self.assertEqual(retry_items[retry_id].failure_reason, 'adapter_unavailable')
+        self.assertEqual(retry_items[failed_verification_id].failure_reason, 'target_acceptance_failed')
+        self.assertIn('target_acceptance_failed', retry_items[failed_verification_id].evidence_line)
+        self.assertEqual([item.run_id for item in stages['evidence_problems']], [evidence_problem_id])
+        self.assertEqual(stages['evidence_problems'][0].evidence_error, 'captured_run_record_unavailable')
+        self.assertNotIn(superseded_id, [item.run_id for stage in first_queue.stages for item in stage.items])
+        self.assertEqual(
+            subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True),
+            status_before_queue,
+        )
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f'http://127.0.0.1:{server.server_port}/api/decision-queue') as response:
+                payload = json.loads(response.read().decode('utf-8'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(payload, asdict(first_queue))
+        self.assertEqual(
+            subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True),
+            status_before_queue,
+        )
+
+    def test_operator_decision_queue_excludes_runs_with_committed_promotion_review(self):
+        run_id = '20260719-010203-000007'
+        workbench, root = self.make_workbench()
+        run_dir = self.write_target_run_evidence(
+            root,
+            run_id,
+            {
+                'run_id': run_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'run_mode': 'target',
+                'patch_sha256': 'b' * 64,
+            },
+        )
+        run_dir.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+        review_path = root / 'reviews' / 'promotion' / f'{run_id}.json'
+        review_path.parent.mkdir(parents=True)
+        review_path.write_text(
+            json.dumps(
+                {
+                    'schema_version': 1,
+                    'review_type': 'promotion',
+                    'run_id': run_id,
+                    'patch_sha256': 'b' * 64,
+                    'reviewer': 'operator',
+                    'decision': 'APPROVED',
+                    'concerns': 'No concerns.',
+                    'follow_up_tasks': [],
+                }
+            ),
+            encoding='utf-8',
+        )
+        subprocess.run(['git', '-C', str(root), 'add', 'reviews/promotion'], check=True)
+        subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Record promotion review'], check=True)
+
+        stages = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
+
+        self.assertEqual(stages['awaiting_promotion_review'], [])
+
+    def test_operator_decision_queue_renders_all_stages_when_empty(self):
+        workbench, _ = self.make_workbench()
+
+        queue = workbench.operator_decision_queue()
+
+        self.assertEqual(
+            [(stage.name, stage.label, stage.items) for stage in queue.stages],
+            [
+                ('awaiting_execution', 'Awaiting execution', []),
+                ('executing', 'Executing', []),
+                ('awaiting_verification', 'Awaiting verification', []),
+                ('awaiting_promotion_review', 'Verified, awaiting promotion review', []),
+                ('retry_decision', 'Retry decision', []),
+                ('evidence_problems', 'Evidence problems', []),
+            ],
+        )
+
+    def test_workbench_html_makes_the_operator_decision_queue_the_home_view(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Operator decision queue', WORKBENCH_HTML)
+        self.assertIn('Nothing awaiting a decision is invisible.', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/decision-queue")', WORKBENCH_HTML)
+        self.assertIn('Prepare a new task', WORKBENCH_HTML)
+        self.assertIn('Historical captured runs', WORKBENCH_HTML)
+        self.assertIn('item.action_label', WORKBENCH_HTML)
+        self.assertIn('item.action === "inspect_evidence"', WORKBENCH_HTML)
+        self.assertIn('renderEvidenceDetails(item.run_id)', WORKBENCH_HTML)
+
+    def test_operator_decision_queue_surfaces_the_active_delegation(self):
+        started = Event()
+        release = Event()
+        run_id = '20260719-020304-000001'
+
+        def target_runner(command, root):
+            started.set()
+            self.assertTrue(release.wait(timeout=5))
+            self.write_run_record(root, run_id)
+            return subprocess.CompletedProcess(command, 0, f'RUN_CAPTURED: {run_id}\n', '')
+
+        workbench, _ = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+        execution = Thread(target=lambda: workbench.execute_confirmed_delegation(self.execute_payload()))
+        execution.start()
+        self.assertTrue(started.wait(timeout=5))
+        try:
+            stages = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
+            self.assertEqual(stages['awaiting_execution'], [])
+            self.assertEqual([item.task_file for item in stages['executing']], ['tasks/workbench-issue-49.task.md'])
+            self.assertEqual([item.adapter for item in stages['executing']], ['codex'])
+        finally:
+            release.set()
+            execution.join(timeout=5)
+
+        self.assertFalse(execution.is_alive())
 
 if __name__ == "__main__":
     unittest.main()
