@@ -943,9 +943,10 @@ class TestWorkbench(unittest.TestCase):
         retry_id = '20260719-010203-000003'
         superseded_id = '20260719-010203-000004'
         evidence_problem_id = '20260719-010203-000005'
+        failed_verification_id = '20260719-010203-000006'
         workbench, root = self.make_workbench()
 
-        for issue_number in (49, 50, 51, 52):
+        for issue_number in (49, 50, 51, 52, 53):
             workbench.approve_draft(self.approval_payload(issue_number=issue_number))
 
         self.write_target_run_evidence(
@@ -997,6 +998,27 @@ class TestWorkbench(unittest.TestCase):
                 'superseded_reason': 'newer_delegation_target_base',
             },
         )
+        failed_verification_run = self.write_target_run_evidence(
+            root,
+            failed_verification_id,
+            {
+                'run_id': failed_verification_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'delegation_task_file': 'tasks/workbench-issue-53.task.md',
+            },
+        )
+        failed_verification_run.joinpath('verify.json').write_text(
+            json.dumps(
+                {
+                    'status': 'FAIL',
+                    'reason': 'target_acceptance_failed',
+                    'acceptance': {'returncode': 1},
+                }
+            ),
+            encoding='utf-8',
+        )
         (root / 'runs' / evidence_problem_id).mkdir(parents=True)
 
         status_before_queue = subprocess.check_output(
@@ -1024,8 +1046,14 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual([item.run_id for item in stages['awaiting_verification']], [awaiting_verification_id])
         self.assertEqual([item.task_file for item in stages['awaiting_verification']], ['tasks/workbench-issue-49.task.md'])
         self.assertEqual([item.run_id for item in stages['awaiting_promotion_review']], [awaiting_review_id])
-        self.assertEqual([item.run_id for item in stages['retry_decision']], [retry_id])
-        self.assertEqual(stages['retry_decision'][0].failure_reason, 'adapter_unavailable')
+        review_item = stages['awaiting_promotion_review'][0]
+        self.assertIn('acceptance PASS', review_item.evidence_line)
+        self.assertIn('changed paths app/widget.py', review_item.evidence_line)
+        self.assertEqual([item.run_id for item in stages['retry_decision']], [failed_verification_id, retry_id])
+        retry_items = {item.run_id: item for item in stages['retry_decision']}
+        self.assertEqual(retry_items[retry_id].failure_reason, 'adapter_unavailable')
+        self.assertEqual(retry_items[failed_verification_id].failure_reason, 'target_acceptance_failed')
+        self.assertIn('target_acceptance_failed', retry_items[failed_verification_id].evidence_line)
         self.assertEqual([item.run_id for item in stages['evidence_problems']], [evidence_problem_id])
         self.assertEqual(stages['evidence_problems'][0].evidence_error, 'captured_run_record_unavailable')
         self.assertNotIn(superseded_id, [item.run_id for stage in first_queue.stages for item in stage.items])
