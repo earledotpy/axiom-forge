@@ -17,6 +17,7 @@ from scripts.operator_evidence import summarize_run
 from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 
 from app.workbench_drafts import issue_to_draft_preview, parse_issue_reference
+from app.planning_sessions import PlanningSessionError, PlanningSessionStore
 from app.workbench_models import (
     DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorDecisionQueue,
@@ -33,6 +34,7 @@ class WorkbenchServer:
         forge_root: Path | None = None,
         target_runner: TargetRunner | None = None,
         verification_runner: VerificationRunner | None = None,
+        planning_sessions: PlanningSessionStore | None = None,
     ):
         self.issue_fetcher = issue_fetcher
         self.default_repo = default_repo
@@ -41,7 +43,32 @@ class WorkbenchServer:
         self._verification_runner = verification_runner or _run_target_mode_verifier
         self._active_delegation_lock = Lock()
         self._active_delegation: tuple[str, str] | None = None
+        self.planning_sessions = planning_sessions
 
+    def start_planning_session(self, payload: object) -> dict:
+        return self._planning_sessions().start(payload)
+
+    def planning_session(self, session_id: str) -> dict:
+        return self._planning_sessions().session(session_id)
+
+    def planning_sessions_list(self) -> list[dict]:
+        return self._planning_sessions().list_sessions()
+
+    def send_planning_message(self, session_id: str, payload: object) -> dict:
+        if not isinstance(payload, dict) or set(payload) != {"message"}:
+            raise PlanningSessionError("invalid_planning_message")
+        return self._planning_sessions().send(session_id, payload["message"])
+
+    def close_planning_session(self, session_id: str) -> dict:
+        return self._planning_sessions().close(session_id)
+
+    def planning_proposal_for_approval(self, session_id: str, version: int) -> dict:
+        return self._planning_sessions().proposal_for_approval(session_id, version)
+
+    def _planning_sessions(self) -> PlanningSessionStore:
+        if self.planning_sessions is None:
+            raise PlanningSessionError("planning_sessions_unavailable")
+        return self.planning_sessions
     def preview_for_issue(self, raw_reference: str) -> DraftTaskPreview:
         reference = parse_issue_reference(raw_reference, default_repo=self.default_repo)
         issue = self.issue_fetcher(reference)

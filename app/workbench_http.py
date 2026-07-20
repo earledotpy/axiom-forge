@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.workbench_html import WORKBENCH_HTML
 from app.workbench_models import WorkbenchApprovalError, WorkbenchExecutionError, WorkbenchVerificationError
+from app.planning_sessions import PlanningSessionError
 from app.workbench_runtime import WorkbenchServer
 
 def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
@@ -17,6 +18,12 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             parsed = urlparse(self.path)
             if parsed.path == "/":
                 self._write_html(WORKBENCH_HTML)
+                return
+            if parsed.path == "/api/planning-sessions":
+                self._handle_planning_sessions()
+                return
+            if parsed.path.startswith("/api/planning-sessions/"):
+                self._handle_planning_session_get(parsed.path)
                 return
             if parsed.path == "/api/draft":
                 self._handle_draft(parsed.query)
@@ -34,6 +41,12 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             parsed = urlparse(self.path)
+            if parsed.path == "/api/planning-sessions":
+                self._handle_planning_session_start()
+                return
+            if parsed.path.startswith("/api/planning-sessions/"):
+                self._handle_planning_session_post(parsed.path)
+                return
             if parsed.path == "/api/approve":
                 self._handle_approve()
                 return
@@ -48,6 +61,61 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
+        def _handle_planning_sessions(self) -> None:
+            try:
+                sessions = workbench.planning_sessions_list()
+            except PlanningSessionError as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json({"authority": "planning_sessions", "sessions": sessions})
+
+        def _handle_planning_session_get(self, path: str) -> None:
+            match = re.fullmatch(r"/api/planning-sessions/([a-f0-9]{32})(?:/proposals/([1-9][0-9]*))?", path)
+            if not match:
+                self._write_json({"error": "invalid_planning_session_reference"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                if match.group(2):
+                    payload = workbench.planning_proposal_for_approval(match.group(1), int(match.group(2)))
+                else:
+                    payload = workbench.planning_session(match.group(1))
+            except PlanningSessionError as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(payload)
+
+        def _handle_planning_session_start(self) -> None:
+            try:
+                payload = self._read_planning_payload()
+                session = workbench.start_planning_session(payload)
+            except (UnicodeDecodeError, ValueError, PlanningSessionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(session, HTTPStatus.CREATED)
+
+        def _handle_planning_session_post(self, path: str) -> None:
+            match = re.fullmatch(r"/api/planning-sessions/([a-f0-9]{32})/(messages|close)", path)
+            if not match:
+                self._write_json({"error": "invalid_planning_session_reference"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                payload = self._read_planning_payload()
+                if match.group(2) == "messages":
+                    session = workbench.send_planning_message(match.group(1), payload)
+                elif payload == {}:
+                    session = workbench.close_planning_session(match.group(1))
+                else:
+                    raise PlanningSessionError("invalid_planning_close_request")
+            except (UnicodeDecodeError, ValueError, PlanningSessionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(session)
+
+        def _read_planning_payload(self) -> object:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            if content_length < 1 or content_length > 1_000_000:
+                raise PlanningSessionError("invalid_planning_session_request")
+            return json.loads(self.rfile.read(content_length).decode("utf-8"))
         def _handle_draft(self, query: str) -> None:
             issue_values = parse_qs(query).get("issue", [])
             if not issue_values:
