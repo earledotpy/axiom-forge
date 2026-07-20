@@ -546,12 +546,17 @@ def _run_queue_item(
     decision_label: str,
     action_label: str,
     action: str,
+    include_review_evidence: bool = False,
 ) -> OperatorDecisionQueueItem:
     fields = [summary.run_id, task_file or "missing_task_file", summary.adapter, summary.run_status]
     if summary.verification_result:
         fields.append(f"verification {summary.verification_result}")
-    if summary.failure_reason:
-        fields.append(summary.failure_reason)
+    if include_review_evidence:
+        fields.append(f"acceptance {summary.acceptance_result}")
+        fields.append(f"changed paths {', '.join(summary.changed_paths) or 'none'}")
+    failure_reason = summary.failure_reason or summary.verification_reason
+    if failure_reason:
+        fields.append(failure_reason)
     return OperatorDecisionQueueItem(
         stage=stage,
         decision_label=decision_label,
@@ -565,7 +570,7 @@ def _run_queue_item(
         verification_result=summary.verification_result,
         acceptance_result=summary.acceptance_result,
         changed_paths=summary.changed_paths,
-        failure_reason=summary.failure_reason or summary.verification_reason,
+        failure_reason=failure_reason,
         evidence_error=None,
     )
 
@@ -589,6 +594,7 @@ def _promotion_review_queue_item(summary: OperatorEvidenceSummary, task_file: st
         decision_label="Prepare promotion review",
         action_label="Prepare review →",
         action="prepare_review",
+        include_review_evidence=True,
     )
 
 
