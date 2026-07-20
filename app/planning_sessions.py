@@ -20,6 +20,7 @@ class PlanningSessionError(ValueError):
 _TERMINAL_STATES = {"CLOSED", "FAILED", "BOUNDARY_VIOLATION"}
 _SESSION_STATES = {"ACTIVE", "IDLE", *_TERMINAL_STATES}
 _REQUIRED_DRIVER_METHODS = ("identity", "start", "send", "events", "resume", "close")
+_STORE_ENFORCED_CAPABILITIES = {"host_enforced_confinement"}
 _FIXED_POLICY = {
     "name": "investigation-only-v1",
     "allow": ["read_target_repository", "read_forge_evidence", "non_mutating_investigation"],
@@ -312,7 +313,10 @@ class PlanningSessionStore:
             if (
                 any(not callable(getattr(driver, method, None)) for method in _REQUIRED_DRIVER_METHODS)
                 or not isinstance(capabilities, dict)
-                or any(capabilities.get(name) is not True for name in REQUIRED_PLANNING_CAPABILITIES)
+                or any(
+                    capabilities.get(name) is not True
+                    for name in set(REQUIRED_PLANNING_CAPABILITIES) - _STORE_ENFORCED_CAPABILITIES
+                )
             ):
                 raise PlanningSessionError("planning_driver_contract_violation")
 

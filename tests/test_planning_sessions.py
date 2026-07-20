@@ -8,7 +8,7 @@ from threading import Thread
 from urllib.request import Request, urlopen
 
 from app.planning_sessions import PlanningSessionError, PlanningSessionStore
-from app.planning_drivers import REQUIRED_PLANNING_CAPABILITIES
+from app.planning_drivers import REQUIRED_PLANNING_CAPABILITIES, planning_driver_registry
 from app.workbench_models import IssueContext
 from app.workbench_runtime import WorkbenchServer
 from app.workbench_http import make_handler
@@ -176,7 +176,7 @@ class TestPlanningSessions(unittest.TestCase):
             pass
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            for capability in REQUIRED_PLANNING_CAPABILITIES:
+            for capability in set(REQUIRED_PLANNING_CAPABILITIES) - {"host_enforced_confinement"}:
                 driver = MissingCapabilityDriver([])
                 driver.capabilities = {name: True for name in REQUIRED_PLANNING_CAPABILITIES}
                 driver.capabilities[capability] = False
@@ -184,6 +184,12 @@ class TestPlanningSessions(unittest.TestCase):
                     with self.assertRaises(PlanningSessionError) as caught:
                         PlanningSessionStore(Path(temporary_directory), {"incomplete": driver})
                     self.assertEqual(str(caught.exception), "planning_driver_contract_violation")
+
+    def test_production_driver_registry_uses_store_owned_worktree_confinement(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            store = PlanningSessionStore(Path(temporary_directory), planning_driver_registry())
+
+            self.assertEqual(set(store.drivers), {"codex", "claude-code"})
 
     def test_selected_proposal_is_recorded_as_zero_authority_approval_provenance(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
