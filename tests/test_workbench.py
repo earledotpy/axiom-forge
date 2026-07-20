@@ -1033,6 +1033,7 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(
             [stage.name for stage in first_queue.stages],
             [
+                'planning_proposals',
                 'awaiting_execution',
                 'executing',
                 'awaiting_verification',
@@ -1084,6 +1085,7 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(
             [(stage.name, stage.label, stage.items) for stage in queue.stages],
             [
+                ('planning_proposals', 'Planning proposals awaiting approval', []),
                 ('awaiting_execution', 'Awaiting execution', []),
                 ('executing', 'Executing', []),
                 ('awaiting_verification', 'Awaiting verification', []),
@@ -1104,6 +1106,21 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('item.action_label', WORKBENCH_HTML)
         self.assertIn('item.action === "inspect_evidence"', WORKBENCH_HTML)
         self.assertIn('renderEvidenceDetails(item.run_id)', WORKBENCH_HTML)
+
+    def test_workbench_html_hosts_planning_sessions_and_zero_authority_proposal_handoff(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Start planning session', WORKBENCH_HTML)
+        self.assertIn('id="planning-workflow"', WORKBENCH_HTML)
+        self.assertIn('id="planning-session-list"', WORKBENCH_HTML)
+        self.assertIn('id="planning-transcript"', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/planning-sessions"', WORKBENCH_HTML)
+        self.assertIn('/api/planning-sessions/${selectedPlanningSession.session_id}/messages', WORKBENCH_HTML)
+        self.assertIn('/api/planning-sessions/${selectedPlanningSession.session_id}/close', WORKBENCH_HTML)
+        self.assertIn('planning_session_id: selectedPlanningProposal ? selectedPlanningProposal.session_id : null', WORKBENCH_HTML)
+        self.assertIn('planning_proposal_version: selectedPlanningProposal ? selectedPlanningProposal.version : null', WORKBENCH_HTML)
+        self.assertIn('session.state !== "BOUNDARY_VIOLATION"', WORKBENCH_HTML)
+        self.assertIn('item.action === "review_planning_proposal"', WORKBENCH_HTML)
 
     def test_operator_decision_queue_surfaces_the_active_delegation(self):
         started = Event()

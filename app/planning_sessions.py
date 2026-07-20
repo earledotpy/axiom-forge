@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from app.planning_drivers import REQUIRED_PLANNING_CAPABILITIES
 
 
 class PlanningSessionError(ValueError):
@@ -16,7 +19,7 @@ class PlanningSessionError(ValueError):
 
 _TERMINAL_STATES = {"CLOSED", "FAILED", "BOUNDARY_VIOLATION"}
 _SESSION_STATES = {"ACTIVE", "IDLE", *_TERMINAL_STATES}
-_REQUIRED_DRIVER_METHODS = ("start", "send", "close")
+_REQUIRED_DRIVER_METHODS = ("identity", "start", "send", "events", "resume", "close")
 _FIXED_POLICY = {
     "name": "investigation-only-v1",
     "allow": ["read_target_repository", "read_forge_evidence", "non_mutating_investigation"],
@@ -31,10 +34,24 @@ class PlanningSessionStore:
     worktree, but never a Forge approval or delegation capability.
     """
 
-    def __init__(self, forge_root: Path, drivers: dict[str, Any]):
+    def __init__(
+        self,
+        forge_root: Path,
+        drivers: dict[str, Any],
+        *,
+        secret_values: list[str] | None = None,
+    ):
         self.root = forge_root.resolve()
         self.sessions_root = self.root / "sessions"
         self.drivers = dict(drivers)
+        values = secret_values if secret_values is not None else _environment_secret_values()
+        self.secret_values = tuple(
+            sorted(
+                {value for value in values if isinstance(value, str) and len(value) >= 6},
+                key=len,
+                reverse=True,
+            )
+        )
         self._validate_drivers()
         self._recover_interrupted_sessions()
 
@@ -44,6 +61,7 @@ class PlanningSessionStore:
         if driver is None:
             raise PlanningSessionError("planning_driver_unavailable")
         target = _target_repository(request["target_repo"], self.root)
+        source = _source_snapshot(request)
         base_sha = _git(target, "rev-parse", "HEAD")
         session_id = uuid.uuid4().hex
         session_dir = self.sessions_root / session_id
@@ -57,28 +75,38 @@ class PlanningSessionStore:
             "adapter_identity": request["adapter"],
             "target_repo": str(target),
             "planning_snapshot_sha": base_sha,
+            "worktree_baseline": _git_state(worktree),
             "worktree": str(worktree),
             "policy": _FIXED_POLICY,
             "policy_identity": _json_hash(_FIXED_POLICY),
             "state": "ACTIVE",
             "resume_identity": None,
             "created_at": _now(),
-            "source": _source_snapshot(request),
+            "source": source,
         }
+        (session_dir / "source.json").write_text(
+            json.dumps(metadata["source"], indent=2) + "\n", encoding="utf-8"
+        )
         self._write_metadata(session_dir, metadata)
         self._append(session_dir, {"type": "operator_prompt", "text": request["prompt"], "at": _now()})
         try:
+            metadata["adapter_identity"] = _driver_identity(driver)
+            self._write_metadata(session_dir, metadata)
             result = driver.start(
                 session_id=session_id,
                 worktree=worktree,
                 policy=_FIXED_POLICY.copy(),
                 seed=metadata["source"],
+                prompt=request["prompt"],
             )
-            self._consume_driver_result(session_dir, metadata, result)
-            self._enforce_baseline(session_dir, metadata)
+            self._consume_driver_result(driver, session_dir, metadata, result)
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._enforce_baseline(session_dir, metadata)
+        except PlanningSessionError:
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._terminal(session_dir, metadata, "FAILED", "planning_driver_contract_violation")
+            raise
         except Exception as error:
-            if isinstance(error, PlanningSessionError):
-                raise
             self._terminal(session_dir, metadata, "FAILED", "planning_driver_start_failed")
             raise PlanningSessionError("planning_driver_start_failed") from error
         return self.session(session_id)
@@ -95,12 +123,20 @@ class PlanningSessionStore:
         self._write_metadata(session_dir, metadata)
         self._append(session_dir, {"type": "operator_message", "text": message, "at": _now()})
         try:
+            driver.resume(
+                resume_identity=metadata["resume_identity"],
+                worktree=Path(metadata["worktree"]),
+                policy=_FIXED_POLICY.copy(),
+            )
             result = driver.send(
                 resume_identity=metadata["resume_identity"], message=message, policy=_FIXED_POLICY.copy()
             )
-            self._consume_driver_result(session_dir, metadata, result)
-            self._enforce_baseline(session_dir, metadata)
+            self._consume_driver_result(driver, session_dir, metadata, result)
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._enforce_baseline(session_dir, metadata)
         except PlanningSessionError:
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._terminal(session_dir, metadata, "FAILED", "planning_driver_contract_violation")
             raise
         except Exception as error:
             self._terminal(session_dir, metadata, "FAILED", "planning_driver_lost")
@@ -122,8 +158,31 @@ class PlanningSessionStore:
         return self.session(session_id)
 
     def session(self, session_id: str) -> dict[str, Any]:
-        _, metadata = self._load(session_id)
-        return dict(metadata)
+        session_dir, metadata = self._load(session_id)
+        events = []
+        transcript = session_dir / "transcript.jsonl"
+        if transcript.is_file():
+            for line in transcript.read_text(encoding="utf-8").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict):
+                    events.append(event)
+        proposals = []
+        proposals_dir = session_dir / "proposals"
+        if proposals_dir.is_dir():
+            for path in sorted(proposals_dir.glob("*.json")):
+                try:
+                    proposal = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                proposals.append({
+                    "version": int(path.stem),
+                    "proposal_sha256": _file_hash(path),
+                    **proposal,
+                })
+        return {**metadata, "events": events, "proposals": proposals}
 
     def list_sessions(self) -> list[dict[str, Any]]:
         if not self.sessions_root.exists():
@@ -132,7 +191,7 @@ class PlanningSessionStore:
 
     def proposal_for_approval(self, session_id: str, version: object) -> dict[str, Any]:
         session_dir, metadata = self._load(session_id)
-        if metadata["state"] == "BOUNDARY_VIOLATION":
+        if metadata["state"] in {"FAILED", "BOUNDARY_VIOLATION"}:
             raise PlanningSessionError("planning_session_not_eligible_for_approval")
         if not isinstance(version, int) or version < 1:
             raise PlanningSessionError("invalid_planning_proposal_reference")
@@ -143,27 +202,44 @@ class PlanningSessionStore:
             raise PlanningSessionError("planning_proposal_not_found") from error
         if not proposal.get("valid"):
             raise PlanningSessionError("planning_proposal_invalid")
-        return {"authority": "draft_only", "session_id": session_id, "proposal_version": version, **proposal["proposal"]}
+        return {
+            "authority": "draft_only",
+            "session_id": session_id,
+            "proposal_version": version,
+            "proposal_sha256": _file_hash(path),
+            **proposal["proposal"],
+        }
 
-    def _consume_driver_result(self, session_dir: Path, metadata: dict[str, Any], result: object) -> None:
-        if not isinstance(result, dict) or not isinstance(result.get("events"), list):
+    def _consume_driver_result(self, driver: Any, session_dir: Path, metadata: dict[str, Any], result: object) -> None:
+        if not isinstance(result, dict):
+            raise PlanningSessionError("planning_driver_contract_violation")
+        try:
+            events = driver.events(result)
+        except Exception as error:
+            raise PlanningSessionError("planning_driver_contract_violation") from error
+        if not isinstance(events, list):
             raise PlanningSessionError("planning_driver_contract_violation")
         resume_identity = result.get("resume_identity")
         if not isinstance(resume_identity, str) or not resume_identity:
             raise PlanningSessionError("planning_driver_contract_violation")
         metadata["resume_identity"] = resume_identity
         sequence = 0
-        for event in result["events"]:
+        for event in events:
             if not isinstance(event, dict) or event.get("sequence") != sequence + 1 or not isinstance(event.get("type"), str):
                 raise PlanningSessionError("planning_event_stream_invalid")
             sequence += 1
-            if event["type"] == "secret_exposure":
-                self._append(session_dir, {"type": "secret_exposure", "text": "[redacted]", "at": _now()})
+            if event["type"] == "secret_exposure" or _contains_secret(event, self.secret_values):
+                self._append(session_dir, {
+                    **_redacted_event(event, self.secret_values),
+                    "type": "secret_exposure",
+                    "text": "[redacted]",
+                    "at": _now(),
+                })
                 self._terminal(session_dir, metadata, "FAILED", "planning_secret_exposure")
                 return
             if event["type"] == "proposal":
                 self._record_proposal(session_dir, event.get("proposal"))
-            self._append(session_dir, _redacted_event(event))
+            self._append(session_dir, _redacted_event(event, self.secret_values))
             if event["type"] == "idle":
                 metadata["state"] = "IDLE"
         self._write_metadata(session_dir, metadata)
@@ -178,12 +254,11 @@ class PlanningSessionStore:
     def _enforce_baseline(self, session_dir: Path, metadata: dict[str, Any]) -> None:
         worktree = Path(metadata["worktree"])
         try:
-            changed = _git(worktree, "status", "--porcelain=v1", "--untracked-files=all")
-            head = _git(worktree, "rev-parse", "HEAD")
+            current = _git_state(worktree)
         except PlanningSessionError:
             self._terminal(session_dir, metadata, "FAILED", "planning_worktree_unavailable")
             return
-        if changed or head != metadata["planning_snapshot_sha"]:
+        if current != metadata["worktree_baseline"]:
             self._terminal(session_dir, metadata, "BOUNDARY_VIOLATION", "planning_worktree_changed")
 
     def _terminal(self, session_dir: Path, metadata: dict[str, Any], state: str, reason: str | None) -> None:
@@ -197,6 +272,8 @@ class PlanningSessionStore:
             "transcript_sha256": _file_hash(transcript), "adapter_identity": metadata["adapter_identity"],
             "resume_identity": metadata["resume_identity"], "planning_snapshot_sha": metadata["planning_snapshot_sha"],
             "policy_identity": metadata["policy_identity"], "closed_at": metadata["closed_at"],
+            "worktree_baseline": metadata["worktree_baseline"], "created_at": metadata["created_at"],
+            "source_sha256": _file_hash(session_dir / "source.json"),
         }
         (session_dir / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
         worktree = Path(metadata["worktree"])
@@ -231,7 +308,12 @@ class PlanningSessionStore:
 
     def _validate_drivers(self) -> None:
         for driver in self.drivers.values():
-            if any(not callable(getattr(driver, method, None)) for method in _REQUIRED_DRIVER_METHODS):
+            capabilities = getattr(driver, "capabilities", None)
+            if (
+                any(not callable(getattr(driver, method, None)) for method in _REQUIRED_DRIVER_METHODS)
+                or not isinstance(capabilities, dict)
+                or any(capabilities.get(name) is not True for name in REQUIRED_PLANNING_CAPABILITIES)
+            ):
                 raise PlanningSessionError("planning_driver_contract_violation")
 
     def _recover_interrupted_sessions(self) -> None:
@@ -248,17 +330,44 @@ class PlanningSessionStore:
                 self._terminal(path, metadata, "FAILED", "planning_server_restarted")
 
 
-def _start_request(payload: object) -> dict[str, str]:
+def _start_request(payload: object) -> dict[str, Any]:
     if not isinstance(payload, dict) or set(payload) - {"adapter", "target_repo", "prompt", "issue_seed"}:
         raise PlanningSessionError("invalid_planning_session_request")
     values = {key: payload.get(key) for key in ("adapter", "target_repo", "prompt")}
     if any(not isinstance(value, str) or not value.strip() for value in values.values()):
         raise PlanningSessionError("invalid_planning_session_request")
-    return values
+    issue_seed = payload.get("issue_seed")
+    if issue_seed is not None and not isinstance(issue_seed, dict):
+        raise PlanningSessionError("invalid_planning_issue_seed")
+    return {**values, "issue_seed": issue_seed}
 
 
-def _source_snapshot(request: dict[str, str]) -> dict[str, Any]:
+def _source_snapshot(request: dict[str, Any]) -> dict[str, Any]:
+    issue = request.get("issue_seed")
+    if issue is not None:
+        required = {"number", "title", "body", "url"}
+        if not required.issubset(issue) or not isinstance(issue.get("number"), int):
+            raise PlanningSessionError("invalid_planning_issue_seed")
+        body = issue.get("body")
+        if not isinstance(body, str):
+            raise PlanningSessionError("invalid_planning_issue_seed")
+        return {
+            "kind": "github_issue",
+            "issue": issue,
+            "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "captured_at": _now(),
+        }
     return {"kind": "free_form", "prompt_sha256": _json_hash(request["prompt"]), "captured_at": _now()}
+
+
+def _driver_identity(driver: Any) -> str:
+    identity = getattr(driver, "identity", None)
+    if not callable(identity):
+        raise PlanningSessionError("planning_driver_contract_violation")
+    value = identity()
+    if not isinstance(value, str) or not value.strip():
+        raise PlanningSessionError("planning_driver_contract_violation")
+    return value
 
 
 def _target_repository(raw_path: str, forge_root: Path) -> Path:
@@ -293,11 +402,54 @@ def _validate_proposal(proposal: object, adapters: set[str]) -> dict[str, Any]:
     return {"valid": True, "proposal": proposal}
 
 
-def _redacted_event(event: dict[str, Any]) -> dict[str, Any]:
-    event = dict(event)
-    if "secret" in event:
-        event["secret"] = "[redacted]"
-    return event
+def _redacted_event(event: dict[str, Any], secret_values: tuple[str, ...]) -> dict[str, Any]:
+    return _redacted_value(event, secret_values)
+
+
+def _redacted_value(value: Any, secret_values: tuple[str, ...]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[redacted]" if "secret" in str(key).casefold() else _redacted_value(item, secret_values)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redacted_value(item, secret_values) for item in value]
+    if isinstance(value, str):
+        for secret in secret_values:
+            value = value.replace(secret, "[redacted]")
+    return value
+
+
+def _contains_secret(value: Any, secret_values: tuple[str, ...]) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_secret(item, secret_values) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_secret(item, secret_values) for item in value)
+    return isinstance(value, str) and any(secret in value for secret in secret_values)
+
+
+def _environment_secret_values() -> list[str]:
+    markers = ("TOKEN", "SECRET", "PASSWORD", "API_KEY")
+    return [
+        value
+        for name, value in os.environ.items()
+        if any(marker in name.upper() for marker in markers) and value
+    ]
+
+
+def _git_state(worktree: Path) -> dict[str, str]:
+    symbolic = subprocess.run(
+        ["git", "-C", str(worktree), "symbolic-ref", "-q", "HEAD"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return {
+        "status": _git(worktree, "status", "--porcelain=v1", "--untracked-files=all"),
+        "head": _git(worktree, "rev-parse", "HEAD"),
+        "symbolic_head": symbolic.stdout.strip() if symbolic.returncode == 0 else "DETACHED",
+        "local_refs": _git(worktree, "for-each-ref", "--format=%(refname):%(objectname)", "refs/heads"),
+    }
 
 
 def _now() -> str:
