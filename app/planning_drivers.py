@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from threading import Lock
 from typing import Callable
 
 
@@ -48,10 +49,15 @@ class _CliPlanningDriver:
     executable = ""
     adapter_name = ""
 
-    def __init__(self, runner: Runner | None = None):
+    def __init__(self, runner: Runner | None = None, process_factory=None):
         self._runner = runner or _run
+        self._process_factory = process_factory if process_factory is not None else (subprocess.Popen if runner is None else None)
+        self.background_turns = self._process_factory is not None
         self._identity: str | None = None
         self._sessions: dict[str, tuple[Path, str]] = {}
+        self._process_lock = Lock()
+        self._processes = {}
+        self._closed_turns = set()
 
     def identity(self) -> str:
         if self._identity is None:
@@ -65,10 +71,10 @@ class _CliPlanningDriver:
             self._identity = result.stdout.strip().splitlines()[0]
         return self._identity
 
-    def start(self, *, session_id, worktree, policy, seed, prompt, resume_identity=None):
-        del session_id, resume_identity
+    def start(self, *, session_id, worktree, policy, seed, prompt, resume_identity=None, event_sink=None):
+        del resume_identity
         self.identity()
-        result = self._run_turn(Path(worktree), _planning_prompt(seed, prompt), None)
+        result = self._run_turn(Path(worktree), _planning_prompt(seed, prompt), None, event_sink, session_id)
         self._sessions[result["resume_identity"]] = (Path(worktree).resolve(), fixed_policy_identity(policy))
         return result
 
@@ -83,11 +89,11 @@ class _CliPlanningDriver:
         self._sessions[resume_identity] = binding
         return resume_identity
 
-    def send(self, *, resume_identity, message, policy):
+    def send(self, *, resume_identity, message, policy, event_sink=None):
         session = self._sessions.get(resume_identity)
         if session is None or session[1] != fixed_policy_identity(policy):
             raise RuntimeError("planning_driver_resume_boundary_mismatch")
-        result = self._run_turn(session[0], message, resume_identity)
+        result = self._run_turn(session[0], message, resume_identity, event_sink, resume_identity)
         if result["resume_identity"] != resume_identity:
             raise RuntimeError("planning_driver_resume_identity_changed")
         return result
@@ -98,20 +104,42 @@ class _CliPlanningDriver:
             raise RuntimeError("planning_driver_event_stream_unavailable")
         return events
 
-    def close(self, *, resume_identity):
+    def close(self, *, resume_identity, session_id=None):
+        turn_keys = {value for value in (resume_identity, session_id) if isinstance(value, str) and value}
+        with self._process_lock:
+            self._closed_turns.update(turn_keys)
+            processes = [self._processes.get(key) for key in turn_keys]
+        for process in processes:
+            if process is not None:
+                _stop_process(process)
         self._sessions.pop(resume_identity, None)
-        return {"resume_identity": resume_identity, "closed": True}
+        return {"resume_identity": resume_identity, "closed": True, "turns_stopped": len([p for p in processes if p is not None])}
 
-    def _run_turn(self, worktree: Path, prompt: str, resume_identity: str | None) -> dict:
+    def _run_turn(self, worktree: Path, prompt: str, resume_identity: str | None, event_sink, turn_key: str) -> dict:
+        command = self._command(worktree, prompt, resume_identity)
+        if self._process_factory is not None:
+            def registered_process_factory(command, **kwargs):
+                process = self._process_factory(command, **kwargs)
+                with self._process_lock:
+                    self._processes[turn_key] = process
+                    already_closed = turn_key in self._closed_turns
+                if already_closed:
+                    _stop_process(process)
+                return process
+
+            try:
+                return _stream_turn(registered_process_factory, command, worktree, self.adapter_name, resume_identity, event_sink)
+            finally:
+                with self._process_lock:
+                    self._processes.pop(turn_key, None)
+                    self._closed_turns.discard(turn_key)
         result = self._runner(
-            self._command(worktree, prompt, resume_identity),
-            cwd=worktree,
-            env=_planning_environment(),
+            command, cwd=worktree, env=_planning_environment(),
         )
         if result.returncode != 0:
             raise RuntimeError(f"{self.adapter_name}_planning_turn_failed")
         records = _json_lines(result.stdout)
-        return _normalize_events(self.adapter_name, records, resume_identity)
+        return _normalize_events(self.adapter_name, records, resume_identity, event_sink)
 
     def _command(self, worktree: Path, prompt: str, resume_identity: str | None) -> list[str]:
         raise NotImplementedError
@@ -156,6 +184,74 @@ def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.Co
     return subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True, check=False)
 
 
+def _stop_process(process):
+    poll = getattr(process, "poll", None)
+    if callable(poll) and poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except TypeError:
+        process.wait()
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _stream_turn(process_factory, command, worktree, adapter, expected_resume_identity, event_sink):
+    process = process_factory(
+        command,
+        cwd=worktree,
+        env=_planning_environment(),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=1,
+    )
+    if process.stdout is None:
+        raise RuntimeError("planning_driver_event_stream_unavailable")
+    resume_identity = expected_resume_identity
+    events = []
+    records_seen = False
+    sequence = 0
+
+    def emit(event):
+        nonlocal sequence
+        sequence = event["sequence"]
+        if event_sink is None:
+            events.append(event)
+        else:
+            event_sink(event)
+
+    try:
+        for line in process.stdout:
+            if not line.strip():
+                continue
+            record = _json_lines(line)[0]
+            records_seen = True
+            discovered = _resume_identity(adapter, record)
+            if discovered:
+                resume_identity = discovered
+            normalized = _record_events(adapter, record, sequence + 1)
+            for event in normalized:
+                emit(event)
+        returncode = process.wait()
+    except Exception:
+        if callable(getattr(process, "terminate", None)):
+            process.terminate()
+            process.wait()
+        raise
+    if returncode != 0:
+        raise RuntimeError(f"{adapter}_planning_turn_failed")
+    if not records_seen:
+        raise RuntimeError("planning_driver_event_stream_invalid")
+    if not resume_identity:
+        raise RuntimeError("planning_driver_resume_identity_missing")
+    emit({"sequence": sequence + 1, "type": "idle"})
+    return {"resume_identity": resume_identity, "events": events}
+
 def _planning_environment() -> dict[str, str]:
     return {name: value for name, value in os.environ.items() if name.upper() in _SAFE_ENVIRONMENT_NAMES}
 
@@ -187,26 +283,34 @@ def _json_lines(output: str) -> list[dict]:
     return records
 
 
-def _normalize_events(adapter: str, records: list[dict], expected_resume_identity: str | None) -> dict:
+def _normalize_events(adapter: str, records: list[dict], expected_resume_identity: str | None, event_sink=None) -> dict:
     resume_identity = expected_resume_identity
     events = []
     for record in records:
         discovered = _resume_identity(adapter, record)
         if discovered:
             resume_identity = discovered
-        text = _assistant_text(adapter, record)
-        event_type = _event_type(record, text)
-        event = {"sequence": len(events) + 1, "type": event_type, "vendor_event": record}
-        if text:
-            event["text"] = text
-        events.append(event)
-        proposal = _proposal_from_text(text)
-        if proposal is not None:
-            events.append({"sequence": len(events) + 1, "type": "proposal", "proposal": proposal})
+        events.extend(_record_events(adapter, record, len(events) + 1))
     if not resume_identity:
         raise RuntimeError("planning_driver_resume_identity_missing")
     events.append({"sequence": len(events) + 1, "type": "idle"})
+    if event_sink is not None:
+        for event in events:
+            event_sink(event)
+        events = []
     return {"resume_identity": resume_identity, "events": events}
+
+
+def _record_events(adapter: str, record: dict, sequence: int) -> list[dict]:
+    text = _assistant_text(adapter, record)
+    event = {"sequence": sequence, "type": _event_type(record, text), "vendor_event": record}
+    if text:
+        event["text"] = text
+    events = [event]
+    proposal = _proposal_from_text(text)
+    if proposal is not None:
+        events.append({"sequence": sequence + 1, "type": "proposal", "proposal": proposal})
+    return events
 
 
 def _resume_identity(adapter: str, record: dict) -> str | None:

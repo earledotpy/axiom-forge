@@ -4,10 +4,12 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock, Thread, current_thread
 from typing import Any
 
 from app.planning_drivers import REQUIRED_PLANNING_CAPABILITIES
@@ -53,6 +55,9 @@ class PlanningSessionStore:
                 reverse=True,
             )
         )
+        self._turn_lock = Lock()
+        self._turns = {}
+        self._closing_sessions = set()
         self._validate_drivers()
         self._recover_interrupted_sessions()
 
@@ -93,6 +98,18 @@ class PlanningSessionStore:
         try:
             metadata["adapter_identity"] = _driver_identity(driver)
             self._write_metadata(session_dir, metadata)
+            if getattr(driver, "background_turns", False):
+                self._launch_turn(
+                    driver,
+                    session_dir,
+                    metadata,
+                    lambda event_sink: driver.start(
+                        session_id=session_id, worktree=worktree, policy=_FIXED_POLICY.copy(),
+                        seed=metadata["source"], prompt=request["prompt"], event_sink=event_sink,
+                    ),
+                    "planning_driver_start_failed",
+                )
+                return self.session(session_id)
             result = driver.start(
                 session_id=session_id,
                 worktree=worktree,
@@ -129,6 +146,17 @@ class PlanningSessionStore:
                 worktree=Path(metadata["worktree"]),
                 policy=_FIXED_POLICY.copy(),
             )
+            if getattr(driver, "background_turns", False):
+                self._launch_turn(
+                    driver,
+                    session_dir,
+                    metadata,
+                    lambda event_sink: driver.send(
+                        resume_identity=metadata["resume_identity"], message=message,
+                        policy=_FIXED_POLICY.copy(), event_sink=event_sink,
+                    ), "planning_driver_lost",
+                )
+                return self.session(session_id)
             result = driver.send(
                 resume_identity=metadata["resume_identity"], message=message, policy=_FIXED_POLICY.copy()
             )
@@ -148,14 +176,34 @@ class PlanningSessionStore:
         session_dir, metadata = self._load(session_id)
         if metadata["state"] in _TERMINAL_STATES:
             return self.session(session_id)
+        driver = self.drivers[metadata["adapter"]]
+        with self._turn_lock:
+            self._closing_sessions.add(session_id)
+            thread = self._turns.get(session_id)
         try:
-            self.drivers[metadata["adapter"]].close(resume_identity=metadata["resume_identity"])
+            close_kwargs = {"resume_identity": metadata["resume_identity"]}
+            if getattr(driver, "background_turns", False):
+                close_kwargs["session_id"] = session_id
+            driver.close(**close_kwargs)
+            if thread is not None and thread is not current_thread():
+                thread.join(timeout=6)
+                if thread.is_alive():
+                    raise RuntimeError("planning_driver_close_timed_out")
+            _, metadata = self._load(session_id)
         except Exception:
-            self._terminal(session_dir, metadata, "FAILED", "planning_driver_close_failed")
+            try:
+                _, metadata = self._load(session_id)
+            except PlanningSessionError:
+                pass
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._terminal(session_dir, metadata, "FAILED", "planning_driver_close_failed")
         else:
             self._enforce_baseline(session_dir, metadata)
             if metadata["state"] not in _TERMINAL_STATES:
                 self._terminal(session_dir, metadata, "CLOSED", None)
+        finally:
+            with self._turn_lock:
+                self._closing_sessions.discard(session_id)
         return self.session(session_id)
 
     def session(self, session_id: str) -> dict[str, Any]:
@@ -192,7 +240,7 @@ class PlanningSessionStore:
 
     def proposal_for_approval(self, session_id: str, version: object) -> dict[str, Any]:
         session_dir, metadata = self._load(session_id)
-        if metadata["state"] in {"FAILED", "BOUNDARY_VIOLATION"}:
+        if metadata["state"] not in {"IDLE", "CLOSED"}:
             raise PlanningSessionError("planning_session_not_eligible_for_approval")
         if not isinstance(version, int) or version < 1:
             raise PlanningSessionError("invalid_planning_proposal_reference")
@@ -211,6 +259,89 @@ class PlanningSessionStore:
             **proposal["proposal"],
         }
 
+    def _launch_turn(self, driver, session_dir, metadata, turn, failure_reason):
+        thread = Thread(
+            target=self._finish_background_turn,
+            args=(driver, session_dir, metadata, turn, failure_reason),
+            daemon=True,
+        )
+        with self._turn_lock:
+            self._turns[session_dir.name] = thread
+        thread.start()
+
+    def _finish_background_turn(self, driver, session_dir, metadata, turn, failure_reason):
+        sequence = 0
+        saw_idle = False
+
+        def event_sink(event):
+            nonlocal saw_idle, sequence
+            sequence += 1
+            self._consume_driver_event(session_dir, metadata, event, sequence)
+            if event["type"] == "idle":
+                saw_idle = True
+
+        try:
+            result = turn(event_sink)
+            if not isinstance(result, dict):
+                raise PlanningSessionError("planning_driver_contract_violation")
+            try:
+                events = driver.events(result)
+            except Exception as error:
+                raise PlanningSessionError("planning_driver_contract_violation") from error
+            if events != []:
+                raise PlanningSessionError("planning_driver_contract_violation")
+            resume_identity = result.get("resume_identity")
+            if not isinstance(resume_identity, str) or not resume_identity:
+                raise PlanningSessionError("planning_driver_contract_violation")
+            metadata["resume_identity"] = resume_identity
+            if not saw_idle:
+                raise PlanningSessionError("planning_event_stream_invalid")
+            self._write_metadata(session_dir, metadata)
+            if metadata["state"] not in _TERMINAL_STATES:
+                self._enforce_baseline(session_dir, metadata)
+            if metadata["state"] == "ACTIVE":
+                metadata["state"] = "IDLE"
+                self._write_metadata(session_dir, metadata)
+        except PlanningSessionError:
+            self._fail_background_turn(session_dir, failure_reason="planning_driver_contract_violation")
+        except Exception:
+            self._fail_background_turn(session_dir, failure_reason=failure_reason)
+        finally:
+            with self._turn_lock:
+                if self._turns.get(session_dir.name) is current_thread():
+                    self._turns.pop(session_dir.name, None)
+
+    def _fail_background_turn(self, session_dir, failure_reason):
+        with self._turn_lock:
+            if session_dir.name in self._closing_sessions:
+                return
+        try:
+            _, current = self._load(session_dir.name)
+        except PlanningSessionError:
+            return
+        if current["state"] not in _TERMINAL_STATES:
+            self._terminal(session_dir, current, "FAILED", failure_reason)
+
+    def _consume_driver_event(self, session_dir, metadata, event, expected_sequence):
+        if not isinstance(event, dict) or event.get("sequence") != expected_sequence or not isinstance(event.get("type"), str):
+            raise PlanningSessionError("planning_event_stream_invalid")
+        _, current = self._load(session_dir.name)
+        if current["state"] in _TERMINAL_STATES:
+            raise PlanningSessionError("planning_session_terminal")
+        if event["type"] == "secret_exposure" or _contains_secret(event, self.secret_values):
+            self._append(session_dir, {
+                **_redacted_event(event, self.secret_values),
+                "type": "secret_exposure",
+                "text": "[redacted]",
+                "at": _now(),
+            })
+            self._terminal(session_dir, metadata, "FAILED", "planning_secret_exposure")
+            return False
+        if event["type"] == "proposal":
+            self._record_proposal(session_dir, event.get("proposal"))
+        self._append(session_dir, _redacted_event(event, self.secret_values))
+        return True
+
     def _consume_driver_result(self, driver: Any, session_dir: Path, metadata: dict[str, Any], result: object) -> None:
         if not isinstance(result, dict):
             raise PlanningSessionError("planning_driver_contract_violation")
@@ -226,21 +357,9 @@ class PlanningSessionStore:
         metadata["resume_identity"] = resume_identity
         sequence = 0
         for event in events:
-            if not isinstance(event, dict) or event.get("sequence") != sequence + 1 or not isinstance(event.get("type"), str):
-                raise PlanningSessionError("planning_event_stream_invalid")
             sequence += 1
-            if event["type"] == "secret_exposure" or _contains_secret(event, self.secret_values):
-                self._append(session_dir, {
-                    **_redacted_event(event, self.secret_values),
-                    "type": "secret_exposure",
-                    "text": "[redacted]",
-                    "at": _now(),
-                })
-                self._terminal(session_dir, metadata, "FAILED", "planning_secret_exposure")
+            if not self._consume_driver_event(session_dir, metadata, event, sequence):
                 return
-            if event["type"] == "proposal":
-                self._record_proposal(session_dir, event.get("proposal"))
-            self._append(session_dir, _redacted_event(event, self.secret_values))
             if event["type"] == "idle":
                 metadata["state"] = "IDLE"
         self._write_metadata(session_dir, metadata)
@@ -286,10 +405,17 @@ class PlanningSessionStore:
         if not isinstance(session_id, str) or not session_id or "/" in session_id or "\\" in session_id:
             raise PlanningSessionError("invalid_planning_session_reference")
         session_dir = self.sessions_root / session_id
-        try:
-            metadata = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise PlanningSessionError("planning_session_not_found") from error
+        for attempt in range(5):
+            try:
+                metadata = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
+            except PermissionError as error:
+                if attempt == 4:
+                    raise PlanningSessionError("planning_session_not_found") from error
+                time.sleep(0.01)
+            except (OSError, json.JSONDecodeError) as error:
+                raise PlanningSessionError("planning_session_not_found") from error
+            else:
+                break
         if not isinstance(metadata, dict) or metadata.get("session_id") != session_id or metadata.get("state") not in _SESSION_STATES:
             raise PlanningSessionError("planning_session_not_found")
         return session_dir, metadata
@@ -308,7 +434,9 @@ class PlanningSessionStore:
             transcript.write(json.dumps(event, sort_keys=True) + "\n")
 
     def _write_metadata(self, session_dir: Path, metadata: dict[str, Any]) -> None:
-        (session_dir / "session.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        temporary = session_dir / f".session-{uuid.uuid4().hex}.tmp"
+        temporary.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, session_dir / "session.json")
 
     def _validate_drivers(self) -> None:
         for driver in self.drivers.values():

@@ -1,10 +1,11 @@
 import json
 import subprocess
 import tempfile
+import time
 import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from urllib.request import Request, urlopen
 
 from app.planning_sessions import PlanningSessionError, PlanningSessionStore
@@ -45,6 +46,56 @@ class ActiveFakeDriver(FakeDriver):
             "resume_identity": f"resume-{session_id}",
             "events": [{"sequence": 1, "type": "message", "text": "Still working."}],
         }
+
+
+class IncrementalFakeDriver(FakeDriver):
+    background_turns = True
+
+    def __init__(self, events):
+        super().__init__(events)
+        self.start_release = Event()
+        self.send_release = Event()
+
+    def start(self, *, session_id, worktree, policy, seed, prompt, resume_identity=None, event_sink=None):
+        proposal = {
+            "task_text": "Bounded incremental task.",
+            "target_scope": ["README.md"],
+            "acceptance_check": "test -f README.md",
+            "suggested_adapter": "fake-a",
+        }
+        events = [
+            {"sequence": 1, "type": "message", "text": "Still investigating."},
+            {"sequence": 2, "type": "proposal", "proposal": proposal},
+            {"sequence": 3, "type": "idle"},
+        ]
+        if event_sink is None:
+            self.start_release.wait(1)
+            return {"resume_identity": f"resume-{session_id}", "events": events}
+        event_sink(events[0])
+        event_sink(events[1])
+        self.start_release.wait(5)
+        event_sink(events[2])
+        return {"resume_identity": f"resume-{session_id}", "events": []}
+
+    def send(self, *, resume_identity, message, policy, event_sink=None):
+        events = [
+            {"sequence": 1, "type": "message", "text": "Refining the plan."},
+            {"sequence": 2, "type": "idle"},
+        ]
+        if event_sink is None:
+            self.send_release.wait(1)
+            return {"resume_identity": resume_identity, "events": events}
+        event_sink(events[0])
+        self.send_release.wait(5)
+        event_sink(events[1])
+        return {"resume_identity": resume_identity, "events": []}
+
+    def close(self, *, resume_identity, session_id=None):
+        self.start_release.set()
+        self.send_release.set()
+        return {"resume_identity": resume_identity, "session_id": session_id, "closed": True}
+
+
 
 
 class IdentityFailureDriver(FakeDriver):
@@ -400,6 +451,201 @@ class TestPlanningSessions(unittest.TestCase):
             self.assertEqual(recovered["state"], "FAILED")
             self.assertEqual(recovered["terminal_reason"], "planning_server_restarted")
             self.assertFalse(Path(recovered["worktree"]).exists())
+
+    def test_incremental_driver_start_returns_active_while_events_are_still_arriving(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            driver = IncrementalFakeDriver([])
+            store = PlanningSessionStore(forge, {"fake-a": driver})
+
+            started_at = time.monotonic()
+            started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            elapsed = time.monotonic() - started_at
+
+            self.assertLess(elapsed, 0.8)
+            self.assertEqual(started["state"], "ACTIVE")
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                current = store.session(started["session_id"])
+                if current["proposals"] and any(event.get("text") == "Still investigating." for event in current["events"]):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("incremental planning message was not observable while the turn was active")
+            with self.assertRaises(PlanningSessionError) as caught:
+                store.proposal_for_approval(started["session_id"], 1)
+            self.assertEqual(str(caught.exception), "planning_session_not_eligible_for_approval")
+
+            driver.start_release.set()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if store.session(started["session_id"])["state"] == "IDLE":
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail(f"incremental planning turn did not become idle: {store.session(started['session_id'])['state']}")
+            self.assertEqual(store.proposal_for_approval(started["session_id"], 1)["task_text"], "Bounded incremental task.")
+
+    def test_incremental_driver_send_returns_active_while_events_are_still_arriving(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            driver = IncrementalFakeDriver([])
+            driver.start_release.set()
+            store = PlanningSessionStore(forge, {"fake-a": driver})
+            started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if store.session(started["session_id"])["state"] == "IDLE":
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("initial planning turn did not become idle")
+
+            sent_at = time.monotonic()
+            sent = store.send(started["session_id"], "Refine it.")
+            elapsed = time.monotonic() - sent_at
+
+            self.assertLess(elapsed, 0.8)
+            self.assertEqual(sent["state"], "ACTIVE")
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                current = store.session(started["session_id"])
+                if any(event.get("text") == "Refining the plan." for event in current["events"]):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("incremental resumed message was not observable while the turn was active")
+            driver.send_release.set()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if store.session(started["session_id"])["state"] == "IDLE":
+                    break
+                time.sleep(0.01)
+
+            else:
+                self.fail("resumed planning turn did not become idle")
+
+    def test_closing_an_active_incremental_turn_waits_for_driver_shutdown_before_teardown(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            driver = IncrementalFakeDriver([])
+            store = PlanningSessionStore(forge, {"fake-a": driver})
+            started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                current = store.session(started["session_id"])
+                if any(event.get("text") == "Still investigating." for event in current["events"]):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("incremental planning message was not observable before close")
+
+            closed = store.close(started["session_id"])
+
+            self.assertEqual(closed["state"], "CLOSED")
+            self.assertFalse(Path(closed["worktree"]).exists())
+
+    def test_http_api_returns_active_and_exposes_incremental_start_and_send_events(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            driver = IncrementalFakeDriver([])
+            workbench = WorkbenchServer(
+                lambda reference: None,
+                forge_root=forge,
+                planning_sessions=PlanningSessionStore(forge, {"fake-a": driver}),
+            )
+            server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(workbench))
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_port}/api/planning-sessions"
+            try:
+                start_request = Request(
+                    base_url,
+                    data=json.dumps({
+                        "adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it.",
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                started_at = time.monotonic()
+                with urlopen(start_request) as response:
+                    started = json.loads(response.read().decode("utf-8"))
+                self.assertLess(time.monotonic() - started_at, 2)
+                self.assertEqual(started["state"], "ACTIVE")
+
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    with urlopen(f"{base_url}/{started['session_id']}") as response:
+                        current = json.loads(response.read().decode("utf-8"))
+                    if current["proposals"] and any(
+                        event.get("text") == "Still investigating." for event in current["events"]
+                    ):
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("HTTP GET did not expose incremental start events")
+
+                driver.start_release.set()
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with urlopen(f"{base_url}/{started['session_id']}") as response:
+                        current = json.loads(response.read().decode("utf-8"))
+                    if current["state"] == "IDLE":
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("HTTP planning start did not become idle")
+
+                send_request = Request(
+                    f"{base_url}/{started['session_id']}/messages",
+                    data=json.dumps({"message": "Refine it."}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                sent_at = time.monotonic()
+                with urlopen(send_request) as response:
+                    sent = json.loads(response.read().decode("utf-8"))
+                self.assertLess(time.monotonic() - sent_at, 2)
+                self.assertEqual(sent["state"], "ACTIVE")
+
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    with urlopen(f"{base_url}/{started['session_id']}") as response:
+                        current = json.loads(response.read().decode("utf-8"))
+                    if any(event.get("text") == "Refining the plan." for event in current["events"]):
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("HTTP GET did not expose incremental send events")
+                driver.send_release.set()
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with urlopen(f"{base_url}/{started['session_id']}") as response:
+                        current = json.loads(response.read().decode("utf-8"))
+                    if current["state"] == "IDLE":
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("HTTP planning send did not become idle")
+
+            finally:
+                driver.start_release.set()
+                driver.send_release.set()
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
     def test_http_api_starts_lists_resumes_and_closes_a_planning_session(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

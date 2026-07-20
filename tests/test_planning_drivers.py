@@ -1,7 +1,9 @@
+import io
 import json
 import subprocess
 import unittest
 from pathlib import Path
+from threading import Event, Thread
 
 from app.planning_drivers import ClaudePlanningDriver, CodexPlanningDriver, fixed_policy_identity
 
@@ -16,10 +18,126 @@ class RecordingRunner:
         return self.responses.pop(0)
 
 
+class StreamingProcess:
+    def __init__(self, records):
+        self.stdout = iter([json.dumps(record) + "\n" for record in records])
+        self.stderr = io.StringIO("")
+        self.returncode = None
+
+    def wait(self):
+        self.returncode = 0
+        return self.returncode
+
+
+class BlockingProcess:
+    def __init__(self, record):
+        self._line = json.dumps(record) + "\n"
+        self._line_emitted = False
+        self.stopped = Event()
+        self.stdout = self
+        self.returncode = None
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self._line_emitted:
+            self._line_emitted = True
+            return self._line
+        self.stopped.wait(5)
+        raise StopIteration
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.returncode = -15
+        self.stopped.set()
+
+    def kill(self):
+        self.terminate()
+
+    def wait(self, timeout=None):
+        if not self.stopped.wait(timeout):
+            raise subprocess.TimeoutExpired("planning-driver", timeout)
+        return self.returncode
+
+class RecordingProcessFactory:
+    def __init__(self, process):
+        self.process = process
+
+    def __call__(self, command, **kwargs):
+        return self.process
+
+
 class TestPlanningDrivers(unittest.TestCase):
     def test_cli_drivers_fail_closed_without_host_enforced_confinement(self):
         self.assertFalse(CodexPlanningDriver.capabilities["host_enforced_confinement"])
         self.assertFalse(ClaudePlanningDriver.capabilities["host_enforced_confinement"])
+
+    def test_codex_streams_normalized_events_from_the_live_process(self):
+        records = [
+            {"type": "thread.started", "thread_id": "codex-thread"},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Working through it."}},
+            {"type": "turn.completed"},
+        ]
+        runner = RecordingRunner([
+            subprocess.CompletedProcess(["codex", "--version"], 0, "codex-cli 1.2.3\n", ""),
+        ])
+        driver = CodexPlanningDriver(
+            runner=runner,
+            process_factory=RecordingProcessFactory(StreamingProcess(records)),
+        )
+        observed = []
+
+        result = driver.start(
+            session_id="forge-session",
+            worktree=Path("C:/target-worktree"),
+            policy={"name": "investigation-only-v1"},
+            seed={"kind": "free_form"},
+            prompt="Investigate.",
+            event_sink=observed.append,
+        )
+
+        self.assertTrue(driver.background_turns)
+        self.assertEqual(result, {"resume_identity": "codex-thread", "events": []})
+        self.assertEqual([event["sequence"] for event in observed], [1, 2, 3, 4])
+        self.assertEqual(observed[1]["text"], "Working through it.")
+        self.assertEqual(observed[-1]["type"], "idle")
+
+    def test_close_stops_the_live_planning_process_before_returning(self):
+        process = BlockingProcess({"type": "thread.started", "thread_id": "codex-thread"})
+        runner = RecordingRunner([
+            subprocess.CompletedProcess(["codex", "--version"], 0, "codex-cli 1.2.3\n", ""),
+        ])
+        driver = CodexPlanningDriver(runner=runner, process_factory=RecordingProcessFactory(process))
+        observed = Event()
+        errors = []
+
+        def run_turn():
+            try:
+                driver.start(
+                    session_id="forge-session",
+                    worktree=Path("C:/target-worktree"),
+                    policy={"name": "investigation-only-v1"},
+                    seed={"kind": "free_form"},
+                    prompt="Investigate.",
+                    event_sink=lambda event: observed.set(),
+                )
+            except RuntimeError as error:
+                errors.append(str(error))
+
+        thread = Thread(target=run_turn)
+        thread.start()
+        self.assertTrue(observed.wait(1))
+
+        closed = driver.close(resume_identity=None, session_id="forge-session")
+        thread.join(timeout=1)
+
+        self.assertTrue(process.stopped.is_set())
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(closed["turns_stopped"], 1)
+        self.assertEqual(errors, ["codex_planning_turn_failed"])
 
     def test_codex_uses_read_only_json_transport_and_normalizes_resume_and_proposal(self):
         records = [
