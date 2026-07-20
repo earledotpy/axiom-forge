@@ -1,5 +1,6 @@
 import json
 import subprocess
+from dataclasses import asdict
 import tempfile
 import unittest
 from http.server import ThreadingHTTPServer
@@ -1074,8 +1075,70 @@ class TestWorkbench(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
-        self.assertEqual(payload['authority'], 'operator_decision_queue')
-        self.assertEqual([stage['name'] for stage in payload['stages']], [stage.name for stage in first_queue.stages])
+        self.assertEqual(payload, asdict(first_queue))
+        self.assertEqual(
+            subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain'], text=True),
+            status_before_queue,
+        )
+
+    def test_operator_decision_queue_excludes_runs_with_committed_promotion_review(self):
+        run_id = '20260719-010203-000007'
+        workbench, root = self.make_workbench()
+        run_dir = self.write_target_run_evidence(
+            root,
+            run_id,
+            {
+                'run_id': run_id,
+                'run_status': 'COMPLETED',
+                'failure_reason': None,
+                'agent': 'codex',
+                'run_mode': 'target',
+                'patch_sha256': 'b' * 64,
+            },
+        )
+        run_dir.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+        review_path = root / 'reviews' / 'promotion' / f'{run_id}.json'
+        review_path.parent.mkdir(parents=True)
+        review_path.write_text(
+            json.dumps(
+                {
+                    'schema_version': 1,
+                    'review_type': 'promotion',
+                    'run_id': run_id,
+                    'patch_sha256': 'b' * 64,
+                    'reviewer': 'operator',
+                    'decision': 'APPROVED',
+                    'concerns': 'No concerns.',
+                    'follow_up_tasks': [],
+                }
+            ),
+            encoding='utf-8',
+        )
+        subprocess.run(['git', '-C', str(root), 'add', 'reviews/promotion'], check=True)
+        subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Record promotion review'], check=True)
+
+        stages = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
+
+        self.assertEqual(stages['awaiting_promotion_review'], [])
+
+    def test_operator_decision_queue_renders_all_stages_when_empty(self):
+        workbench, _ = self.make_workbench()
+
+        queue = workbench.operator_decision_queue()
+
+        self.assertEqual(
+            [(stage.name, stage.label, stage.items) for stage in queue.stages],
+            [
+                ('awaiting_execution', 'Awaiting execution', []),
+                ('executing', 'Executing', []),
+                ('awaiting_verification', 'Awaiting verification', []),
+                ('awaiting_promotion_review', 'Verified, awaiting promotion review', []),
+                ('retry_decision', 'Retry decision', []),
+                ('evidence_problems', 'Evidence problems', []),
+            ],
+        )
 
     def test_operator_decision_queue_renders_all_stages_when_empty(self):
         workbench, _ = self.make_workbench()

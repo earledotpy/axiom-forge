@@ -258,7 +258,7 @@ class WorkbenchServer:
                 retry_decision.append(_retry_queue_item(summary, task_file))
             elif summary.verification_result == "NOT_RUN":
                 awaiting_verification.append(_verification_queue_item(summary, task_file))
-            elif summary.verification_result == "PASS":
+            elif summary.verification_result == "PASS" and run.state == "verified":
                 awaiting_promotion_review.append(_promotion_review_queue_item(summary, task_file))
 
         return OperatorDecisionQueue(
