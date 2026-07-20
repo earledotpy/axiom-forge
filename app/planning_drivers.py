@@ -73,10 +73,14 @@ class _CliPlanningDriver:
         return result
 
     def resume(self, *, resume_identity, worktree, policy):
-        expected = self._sessions.get(resume_identity)
-        actual = (Path(worktree).resolve(), fixed_policy_identity(policy))
-        if expected != actual:
+        binding = (Path(worktree).resolve(), fixed_policy_identity(policy))
+        existing = self._sessions.get(resume_identity)
+        if existing is not None and existing != binding:
             raise RuntimeError("planning_driver_resume_boundary_mismatch")
+        # After a server restart the in-memory map is empty; the store passes the
+        # Forge-owned worktree and policy for a persisted IDLE session, so rebind
+        # from them rather than failing closed as if the vendor process were lost.
+        self._sessions[resume_identity] = binding
         return resume_identity
 
     def send(self, *, resume_identity, message, policy):

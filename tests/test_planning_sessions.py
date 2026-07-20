@@ -52,6 +52,26 @@ class IdentityFailureDriver(FakeDriver):
         raise RuntimeError("identity unavailable")
 
 
+class TwoTurnDriver(FakeDriver):
+    """A driver that emits one event stream on start and another on resume/send."""
+
+    def __init__(self, start_events, send_events):
+        super().__init__(start_events)
+        self._send_events = send_events
+
+    def send(self, *, resume_identity, message, policy):
+        return {"resume_identity": resume_identity, "events": self._send_events}
+
+
+def _queued_runner(responses):
+    queue = list(responses)
+
+    def run(command, *, cwd, env):
+        return queue.pop(0)
+
+    return run
+
+
 class TestPlanningSessions(unittest.TestCase):
     def make_target(self, root):
         target = root / "target"
@@ -275,6 +295,28 @@ class TestPlanningSessions(unittest.TestCase):
             self.assertIn("[redacted]", transcript)
             self.assertEqual(session["terminal_reason"], "planning_secret_exposure")
 
+    def test_operator_entered_secrets_are_scrubbed_from_the_transcript_without_ending_the_session(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            store = PlanningSessionStore(
+                forge,
+                {"fake-a": FakeDriver([{"sequence": 1, "type": "idle"}])},
+                secret_values=["op-secret-9999"],
+            )
+            session = store.start(
+                {"adapter": "fake-a", "target_repo": str(target), "prompt": "Look at op-secret-9999 please."}
+            )
+
+            resumed = store.send(session["session_id"], "Remember op-secret-9999 for later.")
+
+            self.assertEqual(resumed["state"], "IDLE")
+            transcript = (forge / "sessions" / session["session_id"] / "transcript.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn("op-secret-9999", transcript)
+            self.assertIn("[redacted]", transcript)
+
     def test_git_ref_change_is_a_boundary_violation_even_when_files_are_clean(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -290,6 +332,57 @@ class TestPlanningSessions(unittest.TestCase):
             result = store.send(session["session_id"], "Continue.")
 
             self.assertEqual(result["state"], "BOUNDARY_VIOLATION")
+
+    def test_persisted_idle_session_survives_restart_and_is_resumable_with_a_real_driver(self):
+        from app.planning_drivers import CodexPlanningDriver
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            start_responses = [
+                subprocess.CompletedProcess(["codex", "--version"], 0, "codex-cli 1.2.3\n", ""),
+                subprocess.CompletedProcess(
+                    ["codex", "exec"],
+                    0,
+                    "\n".join(json.dumps(record) for record in [
+                        {"type": "thread.started", "thread_id": "codex-thread"},
+                        {"type": "turn.completed"},
+                    ]),
+                    "",
+                ),
+            ]
+            first_store = PlanningSessionStore(
+                forge, {"codex": CodexPlanningDriver(runner=_queued_runner(start_responses))}
+            )
+            session = first_store.start({"adapter": "codex", "target_repo": str(target), "prompt": "Investigate."})
+            self.assertEqual(session["state"], "IDLE")
+
+            # A server restart drops the driver's in-memory session map. A fresh
+            # store + fresh driver must leave the persisted IDLE session intact
+            # (only ACTIVE fails) and still resume it from the recorded identity.
+            resume_responses = [
+                subprocess.CompletedProcess(
+                    ["codex", "exec", "resume"],
+                    0,
+                    "\n".join(json.dumps(record) for record in [
+                        {"type": "item.completed", "item": {"type": "agent_message", "text": "Resumed after restart."}},
+                        {"type": "turn.completed"},
+                    ]),
+                    "",
+                ),
+            ]
+            restarted_store = PlanningSessionStore(
+                forge, {"codex": CodexPlanningDriver(runner=_queued_runner(resume_responses))}
+            )
+            self.assertEqual(restarted_store.session(session["session_id"])["state"], "IDLE")
+
+            resumed = restarted_store.send(session["session_id"], "Continue after restart.")
+
+            self.assertEqual(resumed["state"], "IDLE")
+            transcript = (forge / "sessions" / session["session_id"] / "transcript.jsonl").read_text(encoding="utf-8")
+            self.assertIn("Resumed after restart.", transcript)
 
     def test_server_restart_fails_active_session_and_public_view_contains_events(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -391,3 +484,105 @@ class TestPlanningSessions(unittest.TestCase):
             receipt = json.loads((session_dir / "receipt.json").read_text(encoding="utf-8"))
             self.assertEqual(receipt["terminal_status"], "FAILED")
             self.assertFalse((session_dir / "worktree").exists())
+
+    def test_planning_session_starts_while_a_delegation_is_active(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            store = PlanningSessionStore(forge, {"fake-a": FakeDriver([{"sequence": 1, "type": "idle"}])})
+            workbench = WorkbenchServer(lambda reference: None, forge_root=forge, planning_sessions=store)
+            workbench._active_delegation = ("tasks/workbench-issue-49.task.md", "codex")
+
+            session = workbench.start_planning_session(
+                {"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan while a delegation runs."}
+            )
+
+            self.assertEqual(session["state"], "IDLE")
+            self.assertEqual(workbench._active_delegation, ("tasks/workbench-issue-49.task.md", "codex"))
+
+    def test_tracked_file_change_is_a_boundary_violation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            store = PlanningSessionStore(forge, {"fake-a": FakeDriver([{"sequence": 1, "type": "idle"}])})
+            session = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            worktree = Path(session["worktree"])
+            worktree.joinpath("README.md").write_text("mutated tracked file\n", encoding="utf-8")
+
+            result = store.send(session["session_id"], "Continue.")
+
+            self.assertEqual(result["state"], "BOUNDARY_VIOLATION")
+            self.assertEqual(result["terminal_reason"], "planning_worktree_changed")
+            self.assertFalse(worktree.exists())
+
+    def test_invalid_proposal_is_evidence_but_cannot_pre_fill_or_reach_the_queue(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            invalid_proposal = {
+                "task_text": "Missing an acceptance check.",
+                "target_scope": ["README.md"],
+                "suggested_adapter": "fake-a",
+            }
+            driver = FakeDriver([
+                {"sequence": 1, "type": "proposal", "proposal": invalid_proposal},
+                {"sequence": 2, "type": "idle"},
+            ])
+            store = PlanningSessionStore(forge, {"fake-a": driver})
+            workbench = WorkbenchServer(lambda reference: None, forge_root=forge, planning_sessions=store)
+            session = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+
+            self.assertEqual(session["proposals"][0]["valid"], False)
+            with self.assertRaises(PlanningSessionError) as caught:
+                store.proposal_for_approval(session["session_id"], 1)
+            self.assertEqual(str(caught.exception), "planning_proposal_invalid")
+            queue = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
+            self.assertEqual(queue["planning_proposals"], [])
+
+    def test_versioned_proposals_are_immutable_and_default_to_the_newest_valid(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = self.make_target(root)
+            first = {
+                "task_text": "First bounded task.",
+                "target_scope": ["README.md"],
+                "acceptance_check": "test -f README.md",
+                "suggested_adapter": "fake-a",
+            }
+            second = {
+                "task_text": "Refined bounded task.",
+                "target_scope": ["README.md", "docs/plan.md"],
+                "acceptance_check": "test -f README.md",
+                "suggested_adapter": "fake-a",
+            }
+            driver = TwoTurnDriver(
+                [
+                    {"sequence": 1, "type": "proposal", "proposal": first},
+                    {"sequence": 2, "type": "idle"},
+                ],
+                [
+                    {"sequence": 1, "type": "proposal", "proposal": second},
+                    {"sequence": 2, "type": "idle"},
+                ],
+            )
+            store = PlanningSessionStore(forge, {"fake-a": driver})
+            workbench = WorkbenchServer(lambda reference: None, forge_root=forge, planning_sessions=store)
+            session = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            resumed = store.send(session["session_id"], "Refine it.")
+
+            self.assertEqual([proposal["version"] for proposal in resumed["proposals"]], [1, 2])
+            session_dir = forge / "sessions" / session["session_id"]
+            self.assertTrue(session_dir.joinpath("proposals", "0001.json").is_file())
+            self.assertTrue(session_dir.joinpath("proposals", "0002.json").is_file())
+            self.assertEqual(store.proposal_for_approval(session["session_id"], 1)["task_text"], "First bounded task.")
+            self.assertEqual(store.proposal_for_approval(session["session_id"], 2)["task_text"], "Refined bounded task.")
+            queue = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
+            self.assertEqual(queue["planning_proposals"][0].planning_proposal_version, 2)

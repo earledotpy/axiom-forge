@@ -163,6 +163,7 @@ WORKBENCH_HTML = r"""<!doctype html>
     }
     .queue-card .meta { font-family: Consolas, "Liberation Mono", monospace; margin-top: 6px; }
     .queue-card button { margin-top: 10px; }
+    .queue-card.planning-default-proposal { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
     .planning-transcript {
       min-height: 180px;
       max-height: 420px;
@@ -793,16 +794,23 @@ WORKBENCH_HTML = r"""<!doctype html>
       }).join("\n");
       const proposals = document.querySelector("#planning-proposals");
       proposals.replaceChildren();
+      const approvable = session.state !== "FAILED" && session.state !== "BOUNDARY_VIOLATION";
+      const validVersions = (session.proposals || []).filter((entry) => entry.valid).map((entry) => entry.version);
+      const newestValidVersion = validVersions.length ? Math.max.apply(null, validVersions) : null;
       (session.proposals || []).forEach((entry) => {
         const card = document.createElement("div");
         card.className = "queue-card";
+        const isDefault = approvable && entry.valid && entry.version === newestValidVersion;
+        if (isDefault) card.classList.add("planning-default-proposal");
         const status = document.createElement("strong");
-        status.textContent = "Proposal " + entry.version + (entry.valid ? " · valid" : " · invalid");
+        status.textContent = "Proposal " + entry.version +
+          (entry.valid ? " · valid" : " · invalid") +
+          (isDefault ? " · newest valid (default)" : "");
         card.append(status);
-        if (entry.valid && session.state !== "FAILED" && session.state !== "BOUNDARY_VIOLATION") {
+        if (entry.valid && approvable) {
           const useButton = document.createElement("button");
           useButton.type = "button";
-          useButton.textContent = "Use proposal as editable draft";
+          useButton.textContent = isDefault ? "Use newest valid proposal (default)" : "Use proposal as editable draft";
           useButton.addEventListener("click", () => usePlanningProposal(session, entry));
           card.append(useButton);
         }

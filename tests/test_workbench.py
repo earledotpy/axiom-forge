@@ -1121,6 +1121,8 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('planning_proposal_version: selectedPlanningProposal ? selectedPlanningProposal.version : null', WORKBENCH_HTML)
         self.assertIn('session.state !== "BOUNDARY_VIOLATION"', WORKBENCH_HTML)
         self.assertIn('item.action === "review_planning_proposal"', WORKBENCH_HTML)
+        self.assertIn('newestValidVersion', WORKBENCH_HTML)
+        self.assertIn('newest valid (default)', WORKBENCH_HTML)
 
     def test_operator_decision_queue_surfaces_the_active_delegation(self):
         started = Event()

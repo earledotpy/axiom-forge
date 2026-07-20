@@ -40,7 +40,7 @@ bash tests/target_operator_loop/run_all.sh
 
 echo
 echo "== Operator Workbench Tests =="
-python -B -m unittest tests.test_operator_evidence tests.test_workbench tests.test_workbench_boundaries
+python -B -m unittest tests.test_operator_evidence tests.test_workbench tests.test_workbench_boundaries tests.test_planning_sessions tests.test_planning_drivers
 
 echo
 echo "== Compatibility Matrix =="

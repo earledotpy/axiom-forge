@@ -89,7 +89,7 @@ class PlanningSessionStore:
             json.dumps(metadata["source"], indent=2) + "\n", encoding="utf-8"
         )
         self._write_metadata(session_dir, metadata)
-        self._append(session_dir, {"type": "operator_prompt", "text": request["prompt"], "at": _now()})
+        self._append(session_dir, {"type": "operator_prompt", "text": self._scrub(request["prompt"]), "at": _now()})
         try:
             metadata["adapter_identity"] = _driver_identity(driver)
             self._write_metadata(session_dir, metadata)
@@ -113,7 +113,7 @@ class PlanningSessionStore:
         return self.session(session_id)
 
     def send(self, session_id: str, message: object) -> dict[str, Any]:
-        session_dir, metadata = self._load_active(session_id)
+        session_dir, metadata = self._load_resumable(session_id)
         if not isinstance(message, str) or not message.strip():
             if isinstance(message, dict) and "tool_approval" in message:
                 self._append(session_dir, {"type": "policy_denied", "reason": "planning_policy_change_forbidden", "at": _now()})
@@ -122,7 +122,7 @@ class PlanningSessionStore:
         driver = self.drivers[metadata["adapter"]]
         metadata["state"] = "ACTIVE"
         self._write_metadata(session_dir, metadata)
-        self._append(session_dir, {"type": "operator_message", "text": message, "at": _now()})
+        self._append(session_dir, {"type": "operator_message", "text": self._scrub(message), "at": _now()})
         try:
             driver.resume(
                 resume_identity=metadata["resume_identity"],
@@ -294,11 +294,14 @@ class PlanningSessionStore:
             raise PlanningSessionError("planning_session_not_found")
         return session_dir, metadata
 
-    def _load_active(self, session_id: str) -> tuple[Path, dict[str, Any]]:
+    def _load_resumable(self, session_id: str) -> tuple[Path, dict[str, Any]]:
         session_dir, metadata = self._load(session_id)
         if metadata["state"] != "IDLE":
             raise PlanningSessionError("planning_session_not_resumable")
         return session_dir, metadata
+
+    def _scrub(self, text: str) -> str:
+        return _redacted_value(text, self.secret_values)
 
     def _append(self, session_dir: Path, event: dict[str, Any]) -> None:
         with (session_dir / "transcript.jsonl").open("a", encoding="utf-8") as transcript:

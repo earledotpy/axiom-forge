@@ -75,6 +75,56 @@ class TestPlanningDrivers(unittest.TestCase):
         self.assertIn("proposal", event_types)
         self.assertEqual(event_types[-1], "idle")
 
+    def test_driver_resumes_a_persisted_idle_session_after_a_server_restart(self):
+        # After a server restart the driver is re-instantiated with an empty
+        # in-memory session map, but the spec keeps an IDLE session resumable
+        # from its persisted opaque resume identity plus the Forge-owned
+        # worktree and policy. Resuming must reconstruct the boundary binding,
+        # not fail closed as though the vendor process were lost.
+        resume_records = [
+            {"type": "thread.started", "thread_id": "codex-thread"},
+            {"type": "turn.completed"},
+        ]
+        runner = RecordingRunner([
+            subprocess.CompletedProcess(
+                ["codex", "exec", "resume"],
+                0,
+                "\n".join(json.dumps(record) for record in resume_records),
+                "",
+            ),
+        ])
+        restarted = CodexPlanningDriver(runner=runner)
+        policy = {"name": "investigation-only-v1"}
+
+        restarted.resume(
+            resume_identity="codex-thread",
+            worktree=Path("C:/target-worktree"),
+            policy=policy,
+        )
+        resumed = restarted.send(
+            resume_identity="codex-thread",
+            message="Continue after restart.",
+            policy=policy,
+        )
+
+        self.assertEqual(resumed["resume_identity"], "codex-thread")
+
+    def test_driver_resume_still_rejects_a_worktree_or_policy_mismatch(self):
+        driver = CodexPlanningDriver(runner=RecordingRunner([]))
+        driver._sessions["codex-thread"] = (
+            Path("C:/target-worktree").resolve(),
+            fixed_policy_identity({"name": "investigation-only-v1"}),
+        )
+
+        with self.assertRaises(RuntimeError) as caught:
+            driver.resume(
+                resume_identity="codex-thread",
+                worktree=Path("C:/other-worktree"),
+                policy={"name": "investigation-only-v1"},
+            )
+
+        self.assertEqual(str(caught.exception), "planning_driver_resume_boundary_mismatch")
+
     def test_claude_uses_fixed_tool_policy_and_resumes_the_recorded_vendor_session(self):
         start_records = [
             {"type": "system", "subtype": "init", "session_id": "claude-session"},
