@@ -534,6 +534,23 @@ WORKBENCH_HTML = """<!doctype html>
       evidenceSummary.append(details);
       evidenceSummary.classList.remove("hidden");
     }
+    async function renderEvidenceDetails(runId) {
+      const response = await fetch(`/api/runs/${runId}/details`);
+      const raw = await response.json();
+      if (!response.ok) throw new Error(raw.error || "captured_run_evidence_unavailable");
+      evidenceSummary.replaceChildren();
+      const title = document.createElement("h3");
+      title.textContent = `Captured run evidence: ${runId}`;
+      evidenceSummary.append(title);
+      [["stdout", raw.stdout], ["stderr", raw.stderr], ["patch diff", raw.patch_diff]].forEach(([label, text]) => {
+        const heading = document.createElement("h4");
+        heading.textContent = label;
+        const pre = document.createElement("pre");
+        pre.textContent = text || "missing";
+        evidenceSummary.append(heading, pre);
+      });
+      evidenceSummary.classList.remove("hidden");
+    }
     async function runQueueAction(item) {
       error.classList.add("hidden");
       try {
@@ -551,6 +568,9 @@ WORKBENCH_HTML = """<!doctype html>
           await renderEvidenceSummary(item.run_id, true);
         } else if (item.action === "retry" || item.action === "prepare_review") {
           await renderEvidenceSummary(item.run_id, false, item.action === "prepare_review");
+          evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (item.action === "inspect_evidence") {
+          await renderEvidenceDetails(item.run_id);
           evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
         } else {
           throw new Error(item.evidence_error || "captured_run_evidence_unavailable");

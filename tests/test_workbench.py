@@ -1076,6 +1076,23 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(payload['authority'], 'operator_decision_queue')
         self.assertEqual([stage['name'] for stage in payload['stages']], [stage.name for stage in first_queue.stages])
 
+    def test_operator_decision_queue_renders_all_stages_when_empty(self):
+        workbench, _ = self.make_workbench()
+
+        queue = workbench.operator_decision_queue()
+
+        self.assertEqual(
+            [(stage.name, stage.label, stage.items) for stage in queue.stages],
+            [
+                ('awaiting_execution', 'Awaiting execution', []),
+                ('executing', 'Executing', []),
+                ('awaiting_verification', 'Awaiting verification', []),
+                ('awaiting_promotion_review', 'Verified, awaiting promotion review', []),
+                ('retry_decision', 'Retry decision', []),
+                ('evidence_problems', 'Evidence problems', []),
+            ],
+        )
+
     def test_workbench_html_makes_the_operator_decision_queue_the_home_view(self):
         from app.workbench import WORKBENCH_HTML
 
@@ -1085,6 +1102,8 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('Prepare a new task', WORKBENCH_HTML)
         self.assertIn('Historical captured runs', WORKBENCH_HTML)
         self.assertIn('item.action_label', WORKBENCH_HTML)
+        self.assertIn('item.action === "inspect_evidence"', WORKBENCH_HTML)
+        self.assertIn('renderEvidenceDetails(item.run_id)', WORKBENCH_HTML)
 
     def test_operator_decision_queue_surfaces_the_active_delegation(self):
         started = Event()
