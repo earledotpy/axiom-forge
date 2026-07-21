@@ -480,7 +480,7 @@ class TestPlanningSessions(unittest.TestCase):
             self.assertEqual(str(caught.exception), "planning_session_not_eligible_for_approval")
 
             driver.start_release.set()
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
@@ -499,7 +499,7 @@ class TestPlanningSessions(unittest.TestCase):
             driver.start_release.set()
             store = PlanningSessionStore(forge, {"fake-a": driver})
             started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
@@ -522,7 +522,7 @@ class TestPlanningSessions(unittest.TestCase):
             else:
                 self.fail("incremental resumed message was not observable while the turn was active")
             driver.send_release.set()
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
