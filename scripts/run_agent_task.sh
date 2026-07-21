@@ -180,6 +180,30 @@ fail_run() {
   exit 1
 }
 
+# Snapshot a repo's working tree for outside-worktree containment comparison.
+#
+# A plain `git status --ignored=matching` collapses each ignored directory to a
+# single `!! dir/` line, so a new file written *into* an already-populated
+# ignored dir (tmp/, runs/, .forge/) produces no diff and evades detection
+# (issue #103). Instead we list ignored files individually via `git ls-files`,
+# so any escape into an ignored sink changes the snapshot regardless of the
+# dir's prior contents.
+#
+# The forge writes this run's own artifacts (cli-provenance.json, etc.) into
+# $RUN_DIR (runs/$RUN_ID) while the adapter runs, which is legitimate -- exclude
+# that single path so the run's own bookkeeping is not mistaken for an escape.
+# The exclusion is anchored to this run's unique id, so it never masks writes
+# into any other run dir or ignored location.
+containment_snapshot() {
+  local repo_dir="$1"
+  local status_lines ignored_lines
+  status_lines="$(git -C "$repo_dir" status --porcelain=v1 --untracked-files=all)" || return 1
+  ignored_lines="$(git -C "$repo_dir" ls-files --others --ignored --exclude-standard)" || return 1
+  printf '%s\n--ignored--\n' "$status_lines"
+  # grep -v exits 1 when every line is filtered out; that is not an error here.
+  printf '%s\n' "$ignored_lines" | grep -v "^runs/$RUN_ID/" || true
+}
+
 if [[ "$TARGET_MODE" -eq 1 ]]; then
   RUN_MODE="target"
   TARGET_REPO=""
@@ -222,7 +246,7 @@ if [[ "$RUN_MODE" == "target" ]]; then
     || fail_run "forge_head_snapshot_failed"
   FORGE_BRANCHES_BEFORE="$(git -C "$ROOT" for-each-ref --format="%(refname)" refs/heads)" \
     || fail_run "forge_branch_snapshot_failed"
-  FORGE_STATUS_BEFORE="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+  FORGE_STATUS_BEFORE="$(containment_snapshot "$ROOT")" \
     || fail_run "forge_status_snapshot_failed"
 fi
 
@@ -252,14 +276,14 @@ ADAPTER_START_HEAD="$(git -C "$AGENT_WT" rev-parse HEAD)" \
 BRANCHES_BEFORE="$(git -C "$WORKTREE_REPO" for-each-ref --format="%(refname)" refs/heads)" \
   || fail_run "adapter_branch_snapshot_failed"
 
-TARGET_STATUS_BEFORE="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+TARGET_STATUS_BEFORE="$(containment_snapshot "$WORKTREE_REPO")" \
   || fail_run "target_repo_status_snapshot_failed"
 
 ADAPTER_EXIT=0
 PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" AXIOM_ADAPTER_FAILURE_FILE="$ADAPTER_FAILURE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || ADAPTER_EXIT=$?
 
-TARGET_STATUS_AFTER="$(git -C "$WORKTREE_REPO" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+TARGET_STATUS_AFTER="$(containment_snapshot "$WORKTREE_REPO")" \
   || fail_run "target_repo_status_snapshot_failed"
 
 if [[ "$TARGET_STATUS_BEFORE" != "$TARGET_STATUS_AFTER" ]]; then
@@ -271,7 +295,7 @@ if [[ "$TARGET_STATUS_BEFORE" != "$TARGET_STATUS_AFTER" ]]; then
 fi
 
 if [[ "$RUN_MODE" == "target" ]]; then
-  FORGE_STATUS_AFTER="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all --ignored=matching)" \
+  FORGE_STATUS_AFTER="$(containment_snapshot "$ROOT")" \
     || fail_run "forge_status_snapshot_failed"
 
   if [[ "$FORGE_STATUS_BEFORE" != "$FORGE_STATUS_AFTER" ]]; then
