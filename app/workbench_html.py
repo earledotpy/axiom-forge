@@ -217,6 +217,12 @@ WORKBENCH_HTML = r"""<!doctype html>
         </div>
         <div id="decision-queue-stages" class="meta">Loading operator decisions…</div>
       </div>
+      <div id="live-run" class="issue hidden">
+        <h2>Live active delegation</h2>
+        <p id="live-run-status" class="meta">Display-only raw output; captured evidence remains authoritative.</p>
+        <h3>stdout</h3><pre id="live-run-stdout"></pre>
+        <h3>stderr</h3><pre id="live-run-stderr"></pre>
+      </div>
       <div id="planning-workflow" class="hidden">
         <div class="issue">
           <h2>Planning sessions</h2>
@@ -305,6 +311,10 @@ WORKBENCH_HTML = r"""<!doctype html>
     const runHistory = document.querySelector("#run-history");
     const decisionQueue = document.querySelector("#decision-queue");
     const decisionQueueStages = document.querySelector("#decision-queue-stages");
+    const liveRun = document.querySelector("#live-run");
+    const liveRunStatus = document.querySelector("#live-run-status");
+    const liveRunStdout = document.querySelector("#live-run-stdout");
+    const liveRunStderr = document.querySelector("#live-run-stderr");
     const draftWorkflow = document.querySelector("#draft-workflow");
     const startDraftButton = document.querySelector("#start-draft-button");
     const planningWorkflow = document.querySelector("#planning-workflow");
@@ -316,6 +326,7 @@ WORKBENCH_HTML = r"""<!doctype html>
     let approvedDelegation = null;
     let selectedPlanningSession = null;
     let selectedPlanningProposal = null;
+    let liveRunPoll = null;
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -424,7 +435,7 @@ WORKBENCH_HTML = r"""<!doctype html>
 
       runButton.disabled = true;
       try {
-        const response = await fetch("/api/run", {
+        const runRequest = fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -432,6 +443,8 @@ WORKBENCH_HTML = r"""<!doctype html>
             confirmed: executionConfirmation.checked,
           }),
         });
+        pollLiveRun();
+        const response = await runRequest;
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload.error || "target_mode_run_failed");
@@ -449,6 +462,23 @@ WORKBENCH_HTML = r"""<!doctype html>
         runButton.disabled = false;
       }
     });
+    async function pollLiveRun() {
+      const response = await fetch("/api/live-run");
+      const payload = await response.json();
+      if (!response.ok) return;
+      liveRun.classList.remove("hidden");
+      liveRunStatus.textContent = payload.reason || payload.state;
+      if (payload.state === "active") {
+        liveRunStdout.textContent = payload.stdout.text;
+        liveRunStderr.textContent = payload.stderr.text;
+        liveRunPoll = setTimeout(pollLiveRun, 1000);
+      } else if (payload.state === "unavailable") {
+        liveRunPoll = setTimeout(pollLiveRun, 1000);
+      } else if (payload.state === "terminal") {
+        await renderDecisionQueue();
+        await renderHistoricalRuns();
+      }
+    }
     async function renderEvidenceSummary(runId, verify = false, readOnly = false) {
       const response = await fetch(verify ? "/api/verify" : `/api/runs/${runId}`, {
         method: verify ? "POST" : "GET",

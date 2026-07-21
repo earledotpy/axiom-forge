@@ -159,6 +159,35 @@ class WorkbenchServer:
         task_file = _retry_execution_target(self.forge_root, retry.run_id)
         return self._run_confirmed_delegation(task_file, retry.adapter)
 
+    def live_run(self) -> dict:
+        state_path = self.forge_root / "runs" / ".live-run.json"
+        if not state_path.is_file():
+            with self._active_delegation_lock:
+                active = self._active_delegation is not None
+            if active:
+                return _live_run_unavailable("live_run_state_missing")
+            return {"authority": "live_run_stream", "state": "inactive"}
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            run_id, lifecycle_state = _live_run_identity(state)
+            if lifecycle_state == "terminal":
+                return {
+                    "authority": "live_run_stream",
+                    "state": "terminal",
+                    "run_id": run_id,
+                }
+            stdout_path = _live_run_log_path(self.forge_root, state, run_id, "stdout")
+            stderr_path = _live_run_log_path(self.forge_root, state, run_id, "stderr")
+            return {
+                "authority": "live_run_stream",
+                "state": "active",
+                "run_id": run_id,
+                "stdout": _bounded_live_tail(stdout_path),
+                "stderr": _bounded_live_tail(stderr_path),
+            }
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return _live_run_unavailable("live_run_state_invalid")
+
     def _run_confirmed_delegation(self, task_file: str, adapter: str) -> CapturedRun:
         command = [
             "bash",
@@ -502,6 +531,47 @@ def _parse_verification_request(payload: object) -> str:
 
 def _is_captured_run_id(run_id: str) -> bool:
     return re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]+", run_id) is not None
+
+
+def _live_run_unavailable(reason: str) -> dict:
+    return {"authority": "live_run_stream", "state": "unavailable", "reason": reason}
+
+
+def _live_run_identity(state: object) -> tuple[str, str]:
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError("invalid_live_run_state")
+    run_id = state.get("run_id")
+    lifecycle_state = state.get("lifecycle_state")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise ValueError("invalid_live_run_state")
+    if lifecycle_state not in {"active", "terminal"}:
+        raise ValueError("invalid_live_run_state")
+    return run_id, lifecycle_state
+
+
+def _live_run_log_path(root: Path, state: dict, run_id: str, stream: str) -> Path:
+    path_value = state.get(f"{stream}_log")
+    expected = f"runs/{run_id}/{stream}.log"
+    if path_value != expected:
+        raise ValueError("invalid_live_run_log_path")
+    path = root / path_value
+    try:
+        path.resolve().relative_to((root / "runs").resolve())
+    except ValueError as error:
+        raise ValueError("invalid_live_run_log_path") from error
+    if not path.is_file():
+        raise ValueError("live_run_log_unavailable")
+    return path
+
+
+def _bounded_live_tail(path: Path) -> dict:
+    byte_limit = 64 * 1024
+    with path.open("rb") as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - byte_limit))
+        tail = stream.read(byte_limit)
+    return {"text": tail.decode("utf-8", errors="replace"), "truncated": size > byte_limit}
 
 
 def _captured_run_directory(root: Path, run_id: str) -> Path:

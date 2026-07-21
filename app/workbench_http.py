@@ -31,6 +31,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/decision-queue":
                 self._handle_decision_queue()
                 return
+            if parsed.path == "/api/live-run":
+                self._handle_live_run(parsed.query)
+                return
             if parsed.path == "/api/runs":
                 self._handle_history()
                 return
@@ -170,6 +173,12 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
 
         def _handle_decision_queue(self) -> None:
             self._write_json(asdict(workbench.operator_decision_queue()))
+
+        def _handle_live_run(self, query: str) -> None:
+            if query:
+                self._write_json({"error": "invalid_live_run_request"}, HTTPStatus.BAD_REQUEST)
+                return
+            self._write_json(workbench.live_run())
 
         def _handle_history(self) -> None:
             self._write_json(

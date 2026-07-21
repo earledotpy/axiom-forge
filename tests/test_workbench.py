@@ -914,6 +914,48 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(by_run_id[missing_id]['verification_state'], 'missing_evidence')
         self.assertEqual(by_run_id[missing_id]['evidence_error'], 'captured_run_record_unavailable')
 
+    def test_http_live_run_reads_bounded_labelled_tails_without_mutation(self):
+        run_id = '20260712-010203-000009'
+        workbench, root = self.make_workbench()
+        run_dir = root / 'runs' / run_id
+        run_dir.mkdir(parents=True)
+        run_dir.joinpath('stdout.log').write_text('a' * (64 * 1024 + 1), encoding='utf-8')
+        run_dir.joinpath('stderr.log').write_bytes(b'stderr tail\n')
+        live_state = root / 'runs' / '.live-run.json'
+        live_state.write_text(
+            json.dumps(
+                {
+                    'schema_version': 1,
+                    'run_id': run_id,
+                    'lifecycle_state': 'active',
+                    'stdout_log': f'runs/{run_id}/stdout.log',
+                    'stderr_log': f'runs/{run_id}/stderr.log',
+                }
+            ),
+            encoding='utf-8',
+        )
+        before = live_state.read_bytes(), run_dir.joinpath('stdout.log').read_bytes(), run_dir.joinpath('stderr.log').read_bytes()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urlopen(f'http://127.0.0.1:{server.server_port}/api/live-run') as response:
+                payload = json.loads(response.read().decode('utf-8'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(payload['state'], 'active')
+        self.assertEqual(payload['run_id'], run_id)
+        self.assertTrue(payload['stdout']['truncated'])
+        self.assertEqual(len(payload['stdout']['text']), 64 * 1024)
+        self.assertEqual(payload['stderr'], {'text': 'stderr tail\n', 'truncated': False})
+        self.assertEqual(
+            before,
+            (live_state.read_bytes(), run_dir.joinpath('stdout.log').read_bytes(), run_dir.joinpath('stderr.log').read_bytes()),
+        )
+
     def test_workbench_html_includes_a_read_only_historical_run_view(self):
         from app.workbench import WORKBENCH_HTML
 
@@ -924,6 +966,16 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('if (!readOnly && (payload.run_status === "FAILED"', WORKBENCH_HTML)
         self.assertIn('renderEvidenceSummary(entry.run_id, false, true)', WORKBENCH_HTML)
         self.assertLess(WORKBENCH_HTML.index('id="evidence-summary"'), WORKBENCH_HTML.index('</aside>'))
+
+    def test_workbench_html_includes_a_display_only_live_run_view(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('id="live-run"', WORKBENCH_HTML)
+        self.assertIn('id="live-run-stdout"', WORKBENCH_HTML)
+        self.assertIn('id="live-run-stderr"', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/live-run")', WORKBENCH_HTML)
+        self.assertIn('setTimeout(pollLiveRun, 1000)', WORKBENCH_HTML)
+        self.assertNotIn('/api/live-run", {\n        method:', WORKBENCH_HTML)
 
     def test_historical_runs_are_rederived_after_new_evidence_appears(self):
         first_id = '20260712-010203-000001'
