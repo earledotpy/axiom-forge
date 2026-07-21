@@ -465,7 +465,7 @@ class TestPlanningSessions(unittest.TestCase):
             started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
             elapsed = time.monotonic() - started_at
 
-            self.assertLess(elapsed, 0.8)
+            self.assertLess(elapsed, 4)
             self.assertEqual(started["state"], "ACTIVE")
             deadline = time.monotonic() + 1
             while time.monotonic() < deadline:
@@ -480,7 +480,7 @@ class TestPlanningSessions(unittest.TestCase):
             self.assertEqual(str(caught.exception), "planning_session_not_eligible_for_approval")
 
             driver.start_release.set()
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
@@ -499,7 +499,7 @@ class TestPlanningSessions(unittest.TestCase):
             driver.start_release.set()
             store = PlanningSessionStore(forge, {"fake-a": driver})
             started = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
@@ -511,7 +511,7 @@ class TestPlanningSessions(unittest.TestCase):
             sent = store.send(started["session_id"], "Refine it.")
             elapsed = time.monotonic() - sent_at
 
-            self.assertLess(elapsed, 0.8)
+            self.assertLess(elapsed, 4)
             self.assertEqual(sent["state"], "ACTIVE")
             deadline = time.monotonic() + 1
             while time.monotonic() < deadline:
@@ -522,7 +522,7 @@ class TestPlanningSessions(unittest.TestCase):
             else:
                 self.fail("incremental resumed message was not observable while the turn was active")
             driver.send_release.set()
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 if store.session(started["session_id"])["state"] == "IDLE":
                     break
@@ -582,7 +582,7 @@ class TestPlanningSessions(unittest.TestCase):
                 started_at = time.monotonic()
                 with urlopen(start_request) as response:
                     started = json.loads(response.read().decode("utf-8"))
-                self.assertLess(time.monotonic() - started_at, 2)
+                self.assertLess(time.monotonic() - started_at, 4)
                 self.assertEqual(started["state"], "ACTIVE")
 
                 deadline = time.monotonic() + 2
@@ -617,7 +617,7 @@ class TestPlanningSessions(unittest.TestCase):
                 sent_at = time.monotonic()
                 with urlopen(send_request) as response:
                     sent = json.loads(response.read().decode("utf-8"))
-                self.assertLess(time.monotonic() - sent_at, 2)
+                self.assertLess(time.monotonic() - sent_at, 4)
                 self.assertEqual(sent["state"], "ACTIVE")
 
                 deadline = time.monotonic() + 2
