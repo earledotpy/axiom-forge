@@ -93,13 +93,12 @@ if ! bash "$SCRIPT_DIR/validate_run_dir.sh" "runs/$RUN_ID" >/dev/null; then
   die "qualification_run_validation_failed"
 fi
 
-if ! bash "$SCRIPT_DIR/verify_patch.sh" "runs/$RUN_ID" >/dev/null; then
-  write_result "FAILED" "patch_verification" "patch_verification_failed" "PASSED" "FAILED" "NOT_RUN" "NOT_RUN"
-  die "qualification_patch_verification_failed"
-fi
-
+# Cheap structural checks (identity, scope) run BEFORE the expensive full-suite
+# verify so out-of-scope / missing-identity cases fail fast without paying the
+# ~46s gate run. Those cases therefore record patch_verification=NOT_RUN (the gate
+# never ran); verify records scope=PASSED because scope has already passed by then.
 ADAPTER_SCRIPT_REVISION="$(git rev-parse "HEAD:agents/$ADAPTER.sh")" || {
-  write_result "FAILED" "identity" "adapter_script_revision_missing" "PASSED" "PASSED" "NOT_RUN" "NOT_RUN"
+  write_result "FAILED" "identity" "adapter_script_revision_missing" "PASSED" "NOT_RUN" "NOT_RUN" "NOT_RUN"
   die "qualification_adapter_script_revision_missing"
 }
 
@@ -108,7 +107,7 @@ IDENTITY_ERROR="$(
     --record "$RUN_DIR/record.json" \
     --adapter-configuration "$ADAPTER_CONFIGURATION"
 )" || {
-  write_result "FAILED" "identity" "$IDENTITY_ERROR" "PASSED" "PASSED" "NOT_RUN" "NOT_RUN"
+  write_result "FAILED" "identity" "$IDENTITY_ERROR" "PASSED" "NOT_RUN" "NOT_RUN" "NOT_RUN"
   die "qualification_$IDENTITY_ERROR"
 }
 
@@ -116,10 +115,15 @@ PATCH="$RUN_DIR/patch.diff"
 while IFS=$'\t' read -r _ _ path; do
   [[ -n "$path" ]] || continue
   if ! grep -Fqx -- "$path" "$ALLOWED_PATHS_FILE"; then
-    write_result "FAILED" "scope" "patch_outside_qualification_scope" "PASSED" "PASSED" "FAILED" "NOT_RUN"
+    write_result "FAILED" "scope" "patch_outside_qualification_scope" "PASSED" "NOT_RUN" "FAILED" "NOT_RUN"
     die "qualification_patch_outside_scope"
   fi
 done < <(git apply --numstat "$PATCH")
+
+if ! bash "$SCRIPT_DIR/verify_patch.sh" "runs/$RUN_ID" >/dev/null; then
+  write_result "FAILED" "patch_verification" "patch_verification_failed" "PASSED" "FAILED" "PASSED" "NOT_RUN"
+  die "qualification_patch_verification_failed"
+fi
 
 if ! BASE_SHA_VARS="$(python "$SCRIPT_DIR/json_shell_vars.py" extract --file "$RUN_DIR/record.json" base_sha)"; then
   die "qualification_base_sha_missing"
