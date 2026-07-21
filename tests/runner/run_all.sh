@@ -271,6 +271,31 @@ else
   pass "R2e_outside_worktree_sentinel_cleaned"
 fi
 
+# Issue #103: an escape into an already-populated ignored dir must still be
+# detected. Pre-seed tmp/ with a decoy so the ignored dir is non-empty before
+# the run; the outside-worktree write must still be caught (a collapsing
+# `git status --ignored=matching` snapshot would miss it here).
+OUTSIDE_WORKTREE_DECOY="$ROOT/tmp/.axiom-outside-worktree-decoy"
+mkdir -p "$ROOT/tmp"
+: > "$OUTSIDE_WORKTREE_DECOY"
+cleanup_outside_worktree_sentinel() {
+  rm -f "$OUTSIDE_WORKTREE_SENTINEL" "$OUTSIDE_WORKTREE_DECOY"
+  rmdir "$ROOT/tmp" 2>/dev/null || true
+}
+expect_runner_fail \
+  "R2d2_outside_worktree_write_detected_in_populated_ignored_dir" \
+  "adapter_modified_outside_worktree" \
+  env "AXIOM_TEST_PARENT_ROOT=$ROOT" bash scripts/run_agent_task.sh bad-outside-worktree-agent tasks/change-answer.task.md
+
+cleanup_outside_worktree_sentinel
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  fail "R2d2_outside_worktree_decoy_cleaned"
+  git status --short >&2
+else
+  pass "R2d2_outside_worktree_decoy_cleaned"
+fi
+
 expect_runner_fail \
   "R2_adapter_commit_records_failure" \
   "adapter_changed_head" \
