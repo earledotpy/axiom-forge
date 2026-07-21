@@ -1,5 +1,0 @@
-# Dev-loop test runner. Not required by the gate (gate uses stdlib unittest).
-# Install with: python -m pip install -r requirements-dev.txt
-# Then run the fast, green dev loop with: pytest   (config in pytest.ini)
-pytest==8.4.2
-pytest-xdist==3.8.0
