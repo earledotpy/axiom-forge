@@ -956,6 +956,65 @@ class TestWorkbench(unittest.TestCase):
             (live_state.read_bytes(), run_dir.joinpath('stdout.log').read_bytes(), run_dir.joinpath('stderr.log').read_bytes()),
         )
 
+    def test_http_live_run_returns_terminal_and_fails_closed_for_invalid_state(self):
+        run_id = '20260712-010203-000010'
+        workbench, root = self.make_workbench()
+        live_state = root / 'runs' / '.live-run.json'
+        live_state.parent.mkdir()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            live_state.write_text('{not-json', encoding='utf-8')
+            with urlopen(f'http://127.0.0.1:{server.server_port}/api/live-run') as response:
+                invalid_payload = json.loads(response.read().decode('utf-8'))
+
+            live_state.write_text(
+                json.dumps(
+                    {
+                        'schema_version': 1,
+                        'run_id': run_id,
+                        'lifecycle_state': 'active',
+                        'stdout_log': 'outside/stdout.log',
+                        'stderr_log': f'runs/{run_id}/stderr.log',
+                    }
+                ),
+                encoding='utf-8',
+            )
+            with urlopen(f'http://127.0.0.1:{server.server_port}/api/live-run') as response:
+                out_of_root_payload = json.loads(response.read().decode('utf-8'))
+            live_state.write_text(
+                json.dumps(
+                    {
+                        'schema_version': 1,
+                        'run_id': run_id,
+                        'lifecycle_state': 'terminal',
+                        'stdout_log': f'runs/{run_id}/stdout.log',
+                        'stderr_log': f'runs/{run_id}/stderr.log',
+                    }
+                ),
+                encoding='utf-8',
+            )
+            with urlopen(f'http://127.0.0.1:{server.server_port}/api/live-run') as response:
+                terminal_payload = json.loads(response.read().decode('utf-8'))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(
+            invalid_payload,
+            {'authority': 'live_run_stream', 'state': 'unavailable', 'reason': 'live_run_state_invalid'},
+        )
+        self.assertEqual(
+            out_of_root_payload,
+            {'authority': 'live_run_stream', 'state': 'unavailable', 'reason': 'live_run_state_invalid'},
+        )
+        self.assertEqual(
+            terminal_payload,
+            {'authority': 'live_run_stream', 'state': 'terminal', 'run_id': run_id},
+        )
+
     def test_workbench_html_includes_a_read_only_historical_run_view(self):
         from app.workbench import WORKBENCH_HTML
 
@@ -975,6 +1034,8 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('id="live-run-stderr"', WORKBENCH_HTML)
         self.assertIn('fetch("/api/live-run")', WORKBENCH_HTML)
         self.assertIn('setTimeout(pollLiveRun, 1000)', WORKBENCH_HTML)
+        self.assertIn('payload.state === "terminal" || payload.state === "inactive"', WORKBENCH_HTML)
+        self.assertIn('await renderDecisionQueue();', WORKBENCH_HTML)
         self.assertNotIn('/api/live-run", {\n        method:', WORKBENCH_HTML)
 
     def test_historical_runs_are_rederived_after_new_evidence_appears(self):

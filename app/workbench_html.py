@@ -474,7 +474,7 @@ WORKBENCH_HTML = r"""<!doctype html>
         liveRunPoll = setTimeout(pollLiveRun, 1000);
       } else if (payload.state === "unavailable") {
         liveRunPoll = setTimeout(pollLiveRun, 1000);
-      } else if (payload.state === "terminal") {
+      } else if (payload.state === "terminal" || payload.state === "inactive") {
         await renderDecisionQueue();
         await renderHistoricalRuns();
       }
