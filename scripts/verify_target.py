@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from forge import subprocess_execution
 from forge.small_helpers import utc_now as shared_utc_now
 
 try:
@@ -66,17 +67,33 @@ def main() -> int:
             command = checks[name]["command"]
             check_result["command"] = command
 
-            completed = subprocess.run(
-                command,
-                cwd=worktree,
-                text=True,
-                capture_output=True,
-                timeout=timeout
-            )
-
-            check_result["returncode"] = completed.returncode
-            check_result["stdout"] = completed.stdout
-            check_result["stderr"] = completed.stderr
+            # Redirect the gate check's stdout/stderr to files rather than
+            # capturing into OS pipes. Tests inside the suite spawn their own
+            # subprocesses that inherit the parent's stdio handles; on Windows,
+            # inherited pipe handles intermittently trip handle races (issue
+            # #104), surfacing as a spurious verification_failed. File-backed
+            # stdio plus a detached stdin hand children no pipe handles to race
+            # on. The gate (uncaptured `unittest discover`) is deterministically
+            # green, so the flake is a verify-runner artifact, not a real fail.
+            with tempfile.TemporaryDirectory(prefix="verify_target_") as logdir:
+                out_path = Path(logdir) / "stdout.log"
+                err_path = Path(logdir) / "stderr.log"
+                with open(out_path, "wb") as out_fh, open(err_path, "wb") as err_fh:
+                    completed = subprocess_execution.run(
+                        command,
+                        cwd=worktree,
+                        stdin_mode="devnull",
+                        timeout=timeout,
+                        stdout=out_fh,
+                        stderr=err_fh,
+                    )
+                check_result["returncode"] = completed.returncode
+                check_result["stdout"] = out_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                check_result["stderr"] = err_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
 
             if completed.returncode == 0:
                 check_result["status"] = "PASS"
