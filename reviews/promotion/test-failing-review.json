@@ -6,5 +6,6 @@
   "reviewer": "promotion-review-test",
   "decision": "CHANGES_REQUESTED",
   "concerns": "Needs changes before promotion.",
+  "evidence_attestation": true,
   "follow_up_tasks": []
 }

@@ -6,6 +6,7 @@
   "reviewer": "promotion-review-test",
   "decision": "APPROVED",
   "concerns": "Refactor requested outside this promotion scope.",
+  "evidence_attestation": true,
   "follow_up_tasks": [
     {
       "kind": "note",

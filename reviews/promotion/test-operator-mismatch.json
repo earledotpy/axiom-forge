@@ -6,5 +6,6 @@
   "reviewer": "promotion-review-test",
   "decision": "APPROVED",
   "concerns": "NO_CONCERNS",
+  "evidence_attestation": true,
   "follow_up_tasks": []
 }
