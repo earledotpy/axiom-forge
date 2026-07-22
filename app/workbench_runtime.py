@@ -177,7 +177,12 @@ class WorkbenchServer:
         email = _git_config_value(self.forge_root, "user.email")
         if reviewer_hint and email:
             reviewer_hint = f"{reviewer_hint} <{email}>"
-        problems = ["stale_delegation_target_base"] if evidence["target"]["stale_base"] else []
+        problems = []
+        if evidence["target"]["stale_base"]:
+            problems.append("stale_delegation_target_base")
+        current_base_problem = _current_target_base_problem(evidence)
+        if current_base_problem is not None and current_base_problem not in problems:
+            problems.append(current_base_problem)
         return PromotionReviewPreparation("promotion_review_preparation", run_id, patch_sha256, _task_intent_from_evidence(run_dir), evidence["evidence_revisions"]["delegation_artifact_revision"], evidence["task"]["approved_paths"], evidence["run"]["adapter"] or "missing_adapter", evidence["target"], evidence["patch"]["changed_paths"], _evidence_text(run_dir / "patch.diff"), evidence["verification"], evidence["acceptance"]["status"], problems, reviewer_hint)
 
     def submit_promotion_review(self, payload: object) -> PromotionReviewSubmission:
@@ -214,19 +219,22 @@ class WorkbenchServer:
             if self._active_promotion is not None:
                 raise WorkbenchPromotionError("active_promotion_in_progress")
             self._active_promotion = run_id
-        with self._active_delegation_lock:
-            if self._active_delegation is not None:
-                raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
         try:
+            with self._active_delegation_lock:
+                if self._active_delegation is not None:
+                    raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
             run_dir = _captured_run_directory(self.forge_root, run_id)
             record = _evidence_json(run_dir / "record.json")
             command = ["bash", str(self.forge_root / "scripts" / "promote.sh")]
             if record.get("run_mode") == "target":
                 command.append("--target")
             command.append(run_dir.relative_to(self.forge_root).as_posix())
-            subprocess.run(command, cwd=self.forge_root, text=True, input=run_id + "\n", capture_output=True, check=False)
+            result = subprocess.run(command, cwd=self.forge_root, text=True, input=run_id + "\n", capture_output=True, check=False)
             promotion = _evidence_json(run_dir / "promotion.json")
-            return PromotionResult("promotion", run_id, "promoted" if promotion.get("status") == "PROMOTED" else "failed", promotion.get("reason") if isinstance(promotion.get("reason"), str) else "promotion_failed", promotion.get("branch") if isinstance(promotion.get("branch"), str) else None, promotion.get("promotion_commit") if isinstance(promotion.get("promotion_commit"), str) else None, promotion.get("promotion_review_revision") if isinstance(promotion.get("promotion_review_revision"), str) else None)
+            state = "promoted" if promotion.get("status") == "PROMOTED" else "failed"
+            reason = promotion.get("reason") if isinstance(promotion.get("reason"), str) else "promotion_failed"
+            diagnostics = _bounded_promotion_diagnostics(result.stdout, result.stderr)
+            return PromotionResult("promotion", run_id, state, reason, promotion.get("branch") if isinstance(promotion.get("branch"), str) else None, promotion.get("promotion_commit") if isinstance(promotion.get("promotion_commit"), str) else None, promotion.get("promotion_review_revision") if isinstance(promotion.get("promotion_review_revision"), str) else None, promotion, diagnostics)
         except WorkbenchVerificationError as error:
             raise WorkbenchPromotionError(str(error)) from error
         finally:
@@ -366,7 +374,7 @@ class WorkbenchServer:
             elif summary.verification_result == "PASS" and run.state == "verified":
                 awaiting_promotion_review.append(_promotion_review_queue_item(summary, task_file))
             elif run.state == "promotion-ready":
-                awaiting_promotion.append(_promotion_queue_item(summary, task_file))
+                awaiting_promotion.append(_promotion_queue_item(self.forge_root, summary, task_file))
 
         return OperatorDecisionQueue(
             authority="operator_decision_queue",
@@ -658,6 +666,32 @@ def _require_clean_promotion_review_repo(root: Path) -> None:
         raise WorkbenchPromotionReviewError("forge_repo_dirty")
 
 
+def _current_target_base_problem(evidence: dict) -> str | None:
+    target = evidence.get("target", {})
+    repo, branch, recorded_base = target.get("repo"), target.get("base_branch"), target.get("delegation_target_base_sha")
+    if not any((repo, branch, recorded_base)):
+        return None
+    if not all(isinstance(value, str) and value for value in (repo, branch, recorded_base)):
+        return "target_identity_unavailable"
+    target_root = Path(repo)
+    if not target_root.is_dir():
+        return "target_identity_unavailable"
+    current_branch = run_git(target_root, "branch", "--show-current")
+    if current_branch.returncode != 0:
+        return "target_branch_unavailable"
+    if current_branch.stdout.strip() != branch:
+        return "target_not_on_expected_base_branch"
+    current_base = run_git(target_root, "rev-parse", f"{branch}^{{commit}}")
+    if current_base.returncode != 0:
+        return "target_base_sha_unresolved"
+    return None if current_base.stdout.strip() == recorded_base else "stale_delegation_target_base"
+
+
+def _bounded_promotion_diagnostics(stdout: str, stderr: str) -> str:
+    output = "\n".join(part for part in (stdout.strip(), stderr.strip()) if part)
+    return output[-(8 * 1024):]
+
+
 def _git_config_value(root: Path, key: str) -> str | None:
     result = run_git(root, "config", "--get", key)
     value = result.stdout.strip()
@@ -888,6 +922,7 @@ def _run_queue_item(
     action_label: str,
     action: str,
     include_review_evidence: bool = False,
+    promotion_evidence: dict | None = None,
 ) -> OperatorDecisionQueueItem:
     fields = [summary.run_id, task_file or "missing_task_file", summary.adapter, summary.run_status]
     if summary.verification_result:
@@ -898,6 +933,9 @@ def _run_queue_item(
     failure_reason = summary.failure_reason or summary.verification_reason
     if failure_reason:
         fields.append(failure_reason)
+    review = promotion_evidence or {}
+    target = review.get("target", {})
+    committed_review = review.get("review", {})
     return OperatorDecisionQueueItem(
         stage=stage,
         decision_label=decision_label,
@@ -913,6 +951,14 @@ def _run_queue_item(
         changed_paths=summary.changed_paths,
         failure_reason=failure_reason,
         evidence_error=None,
+        target_repository=target.get("repo"),
+        target_branch=target.get("base_branch"),
+        target_base_sha=target.get("delegation_target_base_sha"),
+        reviewer=committed_review.get("reviewer"),
+        review_decision=committed_review.get("decision"),
+        review_concerns=committed_review.get("concerns"),
+        promotion_review_revision=committed_review.get("revision"),
+        current_blocker=review.get("blocker"),
     )
 
 
@@ -939,7 +985,14 @@ def _promotion_review_queue_item(summary: OperatorEvidenceSummary, task_file: st
     )
 
 
-def _promotion_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+def _promotion_queue_item(forge_root: Path, summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+    evidence = summarize_run(forge_root / "runs" / summary.run_id, forge_root)
+    review_path = forge_root / "reviews" / "promotion" / f"{summary.run_id}.json"
+    review = _evidence_json(review_path) if review_path.is_file() else {}
+    review["revision"] = evidence["evidence_revisions"].get("promotion_review_revision")
+    blocker = _current_target_base_problem(evidence)
+    if blocker is None and run_git(forge_root, "status", "--porcelain").stdout.strip():
+        blocker = "forge_repo_dirty"
     return _run_queue_item(
         summary,
         task_file,
@@ -948,6 +1001,7 @@ def _promotion_queue_item(summary: OperatorEvidenceSummary, task_file: str | Non
         action_label="Promote…",
         action="promote",
         include_review_evidence=True,
+        promotion_evidence={"target": evidence["target"], "review": review, "blocker": blocker},
     )
 
 def _retry_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:

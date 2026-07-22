@@ -1239,6 +1239,12 @@ class TestWorkbench(unittest.TestCase):
         stages = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
 
         self.assertEqual(stages['awaiting_promotion_review'], [])
+        promotion_item = stages['awaiting_promotion'][0]
+        self.assertEqual(promotion_item.reviewer, 'operator')
+        self.assertEqual(promotion_item.review_decision, 'APPROVED')
+        self.assertEqual(promotion_item.review_concerns, 'No concerns.')
+        self.assertTrue(promotion_item.promotion_review_revision)
+        self.assertEqual(promotion_item.current_blocker, 'forge_repo_dirty')
 
     def test_operator_decision_queue_renders_all_stages_when_empty(self):
         workbench, _ = self.make_workbench()
@@ -1301,6 +1307,11 @@ class TestWorkbench(unittest.TestCase):
             'I attest that I reviewed the displayed run, patch, and evidence.',
             'fetch("/api/promotion-reviews"',
             'evidence_attestation: attestation.checked',
+            'Promotion in progress',
+            'promotion_record',
+            'diagnostics',
+            'item.review_decision',
+            'item.current_blocker',
         ):
             self.assertIn(field, WORKBENCH_HTML)
 
@@ -1308,7 +1319,7 @@ class TestWorkbench(unittest.TestCase):
         run_id = '20260722-010203-000111'
         patch_sha256 = 'c' * 64
         workbench, root = self.make_workbench()
-        (root / '.gitignore').write_text('runs/\n', encoding='utf-8')
+        (root / '.gitignore').write_text('runs/\ntarget/\n', encoding='utf-8')
         subprocess.run(['git', '-C', str(root), 'add', '.gitignore'], check=True)
         subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Ignore captured evidence'], check=True)
         run_dir = self.write_target_run_evidence(
@@ -1339,6 +1350,40 @@ class TestWorkbench(unittest.TestCase):
                 'evidence_attestation': True,
             })
         self.assertEqual(str(caught.exception), 'promotion_review_already_exists')
+
+    def test_promotion_review_submission_rechecks_current_target_base(self):
+        run_id = '20260722-010203-000112'
+        patch_sha256 = 'd' * 64
+        workbench, root = self.make_workbench()
+        (root / '.gitignore').write_text('runs/\ntarget/\n', encoding='utf-8')
+        subprocess.run(['git', '-C', str(root), 'add', '.gitignore'], check=True)
+        subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Ignore captured evidence'], check=True)
+        target = root / 'target'
+        subprocess.run(['git', 'init', '-q', str(target)], check=True)
+        subprocess.run(['git', '-C', str(target), 'config', 'user.email', 'target@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(target), 'config', 'user.name', 'Target'], check=True)
+        (target / 'README.md').write_text('base\n', encoding='utf-8')
+        subprocess.run(['git', '-C', str(target), 'add', 'README.md'], check=True)
+        subprocess.run(['git', '-C', str(target), 'commit', '-q', '-m', 'base'], check=True)
+        base_sha = subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'], text=True).strip()
+        run_dir = self.write_target_run_evidence(root, run_id, {
+            'run_id': run_id, 'run_status': 'COMPLETED', 'failure_reason': None,
+            'agent': 'codex', 'run_mode': 'target', 'patch_sha256': patch_sha256,
+            'target_repo': str(target), 'target_base_branch': 'master',
+            'target_base_sha': base_sha, 'delegation_target_base_sha': base_sha,
+        })
+        run_dir.joinpath('verify.json').write_text(json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8')
+        workbench.prepare_promotion_review({'run_id': run_id})
+        (target / 'README.md').write_text('advanced\n', encoding='utf-8')
+        subprocess.run(['git', '-C', str(target), 'add', 'README.md'], check=True)
+        subprocess.run(['git', '-C', str(target), 'commit', '-q', '-m', 'advance target'], check=True)
+        with self.assertRaises(WorkbenchPromotionReviewError) as caught:
+            workbench.submit_promotion_review({
+                'run_id': run_id, 'patch_sha256': patch_sha256, 'reviewer': 'operator',
+                'decision': 'APPROVED', 'concerns': 'NO_CONCERNS', 'follow_up_tasks': [],
+                'evidence_attestation': True,
+            })
+        self.assertEqual(str(caught.exception), 'stale_delegation_target_base')
 
     def test_workbench_html_hosts_planning_sessions_and_zero_authority_proposal_handoff(self):
         from app.workbench import WORKBENCH_HTML

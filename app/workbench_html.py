@@ -731,6 +731,8 @@ WORKBENCH_HTML = r"""<!doctype html>
         } else if (item.action === "promote") {
           const confirmation = window.prompt(`Type the exact run ID to promote ${item.run_id}:`);
           if (confirmation === null) return;
+          evidenceSummary.textContent = `Promotion in progress for ${item.run_id}…`;
+          evidenceSummary.classList.remove("hidden");
           const response = await fetch("/api/promote", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -738,7 +740,13 @@ WORKBENCH_HTML = r"""<!doctype html>
           });
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || "promotion_failed");
-          await renderEvidenceSummary(item.run_id);
+          evidenceSummary.replaceChildren();
+          const resultHeading = document.createElement("h3");
+          resultHeading.textContent = payload.state === "promoted" ? "Promotion complete" : "Promotion failed closed";
+          const result = document.createElement("pre");
+          result.textContent = JSON.stringify({ state: payload.state, reason: payload.reason, branch: payload.branch, promotion_commit: payload.promotion_commit, promotion_review_revision: payload.promotion_review_revision, promotion_json: payload.promotion_record, diagnostics: payload.diagnostics }, null, 2);
+          evidenceSummary.append(resultHeading, result);
+          evidenceSummary.classList.remove("hidden");
         } else if (item.action === "prepare_review") {
           await renderPromotionReview(item.run_id);
           evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -793,6 +801,12 @@ WORKBENCH_HTML = r"""<!doctype html>
           evidence.className = "meta";
           evidence.textContent = item.evidence_line;
           card.append(decision, evidence);
+          if (item.stage === "awaiting_promotion") {
+            const reviewEvidence = document.createElement("div");
+            reviewEvidence.className = "meta";
+            reviewEvidence.textContent = `Target ${item.target_repository || "missing"} · branch ${item.target_branch || "missing"} · base ${item.target_base_sha || "missing"} · reviewer ${item.reviewer || "missing"} · decision ${item.review_decision || "missing"} · concerns ${item.review_concerns || "missing"} · review ${item.promotion_review_revision || "missing"} · blocker ${item.current_blocker || "none"}`;
+            card.append(reviewEvidence);
+          }
           if (item.action_label) {
             const action = document.createElement("button");
             action.type = "button";
@@ -1019,6 +1033,12 @@ WORKBENCH_HTML = r"""<!doctype html>
           ? `${summary.run_status}; verification ${summary.verification_result}; read-only evidence.`
           : `Missing evidence: ${entry.evidence_error}.`;
         item.append(detail);
+        if (summary && summary.state === "promoted") {
+          const promotion = document.createElement("div");
+          promotion.className = "meta";
+          promotion.textContent = `Gate branch ${summary.promotion.branch || "missing"}; commit ${summary.promotion.promotion_commit || "missing"}; review ${summary.promotion_review.revision || "missing"}.`;
+          item.append(promotion);
+        }
         if (summary) {
           const button = document.createElement("button");
           button.type = "button";

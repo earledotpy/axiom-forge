@@ -123,6 +123,14 @@ class OperatorDecisionQueueItem:
     evidence_error: str | None
     planning_session_id: str | None = None
     planning_proposal_version: int | None = None
+    target_repository: str | None = None
+    target_branch: str | None = None
+    target_base_sha: str | None = None
+    reviewer: str | None = None
+    review_decision: str | None = None
+    review_concerns: str | None = None
+    promotion_review_revision: str | None = None
+    current_blocker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,10 @@ class PromotionResult:
     branch: str | None
     promotion_commit: str | None
     promotion_review_revision: str | None
+    promotion_record: dict[str, object] | None = None
+    diagnostics: str = ""
+
+
 @dataclass(frozen=True)
 class CapturedRun:
     authority: str
