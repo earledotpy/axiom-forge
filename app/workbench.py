@@ -8,8 +8,10 @@ from app.workbench_http import make_handler
 from app.workbench_models import (
     DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueContext, IssueFetcher, IssueReference,
-    OperatorEvidenceDetails, OperatorEvidenceSummary, TargetRunner, VerificationRunner,
-    WorkbenchApprovalError, WorkbenchExecutionError, WorkbenchVerificationError,
+    OperatorEvidenceDetails, OperatorEvidenceSummary, PromotionResult, PromotionReviewPreparation,
+    PromotionReviewSubmission, TargetRunner, VerificationRunner, WorkbenchApprovalError,
+    WorkbenchExecutionError, WorkbenchPromotionError, WorkbenchPromotionReviewError,
+    WorkbenchVerificationError,
 )
 from app.workbench_runtime import DraftApproval, WorkbenchServer
 

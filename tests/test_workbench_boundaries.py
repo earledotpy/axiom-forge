@@ -34,11 +34,10 @@ class TestWorkbenchBoundaries(unittest.TestCase):
             urlopen(request)
         self.assertEqual(caught.exception.code, 404)
 
-    def test_promotion_and_qualification_are_not_workbench_routes(self):
+    def test_qualification_is_not_a_workbench_route_and_promotion_uses_a_narrow_route(self):
         html = WORKBENCH_HTML.casefold()
-        self.assertNotIn('fetch("/api/promote"', html)
-        self.assertNotIn('id="promote', html)
-        self.assertNotIn('textcontent = "promote', html)
+        self.assertIn('fetch("/api/promote"', html)
+        self.assertIn('exact run id', html)
         self.assertNotIn("qualification", html)
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -46,7 +45,14 @@ class TestWorkbenchBoundaries(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                self.assert_post_not_found(server, "/api/promote")
+                request = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/promote",
+                    data=json.dumps({}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request)
+                self.assertEqual(caught.exception.code, 400)
                 self.assert_post_not_found(server, "/api/qualification")
             finally:
                 server.shutdown()

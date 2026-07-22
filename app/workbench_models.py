@@ -71,6 +71,14 @@ class WorkbenchVerificationError(ValueError):
     pass
 
 
+class WorkbenchPromotionReviewError(ValueError):
+    pass
+
+
+class WorkbenchPromotionError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class OperatorEvidenceSummary:
     authority: str
@@ -137,6 +145,42 @@ class OperatorEvidenceDetails:
     stderr: str
     patch_diff: str
 
+
+@dataclass(frozen=True)
+class PromotionReviewPreparation:
+    authority: str
+    run_id: str
+    patch_sha256: str
+    task_intent: str
+    delegation_artifact_revision: str | None
+    approved_scope: list[str]
+    adapter: str
+    target: dict[str, str | None]
+    changed_paths: list[str]
+    patch_diff: str
+    verification: dict[str, str | None]
+    acceptance_result: str
+    evidence_problems: list[str]
+    reviewer_hint: str | None
+
+
+@dataclass(frozen=True)
+class PromotionReviewSubmission:
+    authority: str
+    run_id: str
+    decision: str
+    promotion_review_revision: str
+
+
+@dataclass(frozen=True)
+class PromotionResult:
+    authority: str
+    run_id: str
+    state: str
+    reason: str | None
+    branch: str | None
+    promotion_commit: str | None
+    promotion_review_revision: str | None
 @dataclass(frozen=True)
 class CapturedRun:
     authority: str

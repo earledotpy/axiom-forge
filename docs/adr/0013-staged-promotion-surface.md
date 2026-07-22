@@ -1,3 +1,8 @@
 # Stage a promotion surface into the workbench last
 
 ADR 0006 kept promotion outside the first workbench UI. We decided the workbench will eventually capture promotion review results (structured, committed — never chat approval) and offer the explicit promote action, superseding that clause of ADR 0006 — but only as the final stage, after the decision-queue home view (stage 0), planning sessions (stage 1), and live run streaming (stage 2) are proven. The fail-closed property lives in the evidence requirements and gate checks, not in which surface invokes them; a button running the same fail-closed promotion command with the same blockers is not weaker than typing it. What ADR 0006 was protecting against was building a promotion UI before the upstream workflow existed, and that reasoning expires once the upstream workflow is real. The chat pane must never double as an approval channel.
+
+
+## Stage 0–2 checkpoint and Stage 3 contract
+
+The Stage 0–2 checkpoint is satisfied. Stage 3 commits immutable, run-specific promotion-review evidence under reviews/promotion/<run-id>.json; a review is not chat approval and cannot apply to another run. A separate typed exact-run-ID confirmation may invoke the unchanged scripts/promote.sh gate. The workbench remains advisory before invocation: every gate, stale-base, scope, clean-tree, verification, approval, branch, and evidence check remains authoritative in the existing promotion command.

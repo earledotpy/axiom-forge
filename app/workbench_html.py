@@ -285,7 +285,7 @@ WORKBENCH_HTML = r"""<!doctype html>
           <div id="approval-result" class="approved hidden"></div>
         </div>
         <div id="execution" class="execution hidden">
-          <div class="meta">Starting a run invokes only the approved target-mode adapter task. It captures run evidence, then you can verify it; promotion remains outside the workbench.</div>
+          <div class="meta">Starting a run invokes only the approved target-mode adapter task. It captures run evidence, then you can verify, review, and explicitly promote it through the existing fail-closed gate.</div>
           <label for="execution-confirmation"><input id="execution-confirmation" type="checkbox">I confirm that I want to start this approved target-mode delegation now.</label>
           <button id="run-button" type="button">Run Approved Delegation</button>
           <div id="execution-result" class="approved hidden"></div>
@@ -627,6 +627,92 @@ WORKBENCH_HTML = r"""<!doctype html>
       });
       evidenceSummary.classList.remove("hidden");
     }
+    async function renderPromotionReview(runId) {
+      const response = await fetch(`/api/promotion-reviews/${runId}`);
+      const preparation = await response.json();
+      if (!response.ok) throw new Error(preparation.error || "promotion_review_preparation_failed");
+      evidenceSummary.replaceChildren();
+      const heading = document.createElement("h3");
+      heading.textContent = `Promotion review: ${preparation.run_id}`;
+      const evidence = document.createElement("dl");
+      [
+        ["Task intent", preparation.task_intent],
+        ["Delegation artifact revision", preparation.delegation_artifact_revision || "missing"],
+        ["Approved target scope", (preparation.approved_scope || []).join(", ") || "missing"],
+        ["Adapter", preparation.adapter],
+        ["Target", JSON.stringify(preparation.target)],
+        ["Run ID", preparation.run_id],
+        ["Patch SHA-256", preparation.patch_sha256],
+        ["Changed paths", (preparation.changed_paths || []).join(", ") || "none"],
+        ["Verification", JSON.stringify(preparation.verification)],
+        ["Acceptance", preparation.acceptance_result],
+        ["Evidence problems", (preparation.evidence_problems || []).join(", ") || "none"],
+      ].forEach(([label, value]) => {
+        const term = document.createElement("dt");
+        const detail = document.createElement("dd");
+        term.textContent = label;
+        detail.textContent = value;
+        evidence.append(term, detail);
+      });
+      const diffHeading = document.createElement("h4");
+      diffHeading.textContent = "Exact patch diff";
+      const diff = document.createElement("pre");
+      diff.textContent = preparation.patch_diff;
+      const form = document.createElement("form");
+      const reviewer = document.createElement("input");
+      reviewer.value = preparation.reviewer_hint || "";
+      const concerns = document.createElement("textarea");
+      concerns.placeholder = "NO_CONCERNS or concrete concerns";
+      const decision = document.createElement("select");
+      ["APPROVED", "CHANGES_REQUESTED"].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        decision.append(option);
+      });
+      const followUps = document.createElement("textarea");
+      followUps.placeholder = "Follow-up drafts as a JSON array; required for CHANGES_REQUESTED.";
+      followUps.value = "[]";
+      const attestation = document.createElement("input");
+      attestation.type = "checkbox";
+      const submit = document.createElement("button");
+      submit.type = "submit";
+      submit.textContent = "Commit promotion review";
+      [["Reviewer", reviewer], ["Decision", decision], ["Concerns", concerns], ["Follow-up drafts", followUps]].forEach(([label, control]) => {
+        const field = document.createElement("label");
+        field.textContent = label;
+        field.append(control);
+        form.append(field);
+      });
+      const attestationLabel = document.createElement("label");
+      attestationLabel.append(attestation, "I attest that I reviewed the displayed run, patch, and evidence.");
+      form.append(attestationLabel, submit);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        let follow_up_tasks;
+        try { follow_up_tasks = JSON.parse(followUps.value); } catch (_) { throw new Error("invalid_promotion_review_followups"); }
+        submit.disabled = true;
+        try {
+          const submission = await fetch("/api/promotion-reviews", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: preparation.run_id, patch_sha256: preparation.patch_sha256,
+              reviewer: reviewer.value, decision: decision.value, concerns: concerns.value,
+              follow_up_tasks, evidence_attestation: attestation.checked }),
+          });
+          const result = await submission.json();
+          if (!submission.ok) throw new Error(result.error || "promotion_review_submission_failed");
+          await renderDecisionQueue();
+          await renderHistoricalRuns();
+          evidenceSummary.textContent = `Committed ${result.decision} promotion review at ${result.promotion_review_revision}.`;
+        } catch (reviewError) {
+          error.textContent = reviewError.message;
+          error.classList.remove("hidden");
+        } finally { submit.disabled = false; }
+      });
+      evidenceSummary.append(heading, evidence, diffHeading, diff, form);
+      evidenceSummary.classList.remove("hidden");
+    }
     async function runQueueAction(item) {
       error.classList.add("hidden");
       try {
@@ -642,8 +728,22 @@ WORKBENCH_HTML = r"""<!doctype html>
           await renderEvidenceSummary(payload.run_id);
         } else if (item.action === "verify") {
           await renderEvidenceSummary(item.run_id, true);
-        } else if (item.action === "retry" || item.action === "prepare_review") {
-          await renderEvidenceSummary(item.run_id, false, item.action === "prepare_review");
+        } else if (item.action === "promote") {
+          const confirmation = window.prompt(`Type the exact run ID to promote ${item.run_id}:`);
+          if (confirmation === null) return;
+          const response = await fetch("/api/promote", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ run_id: item.run_id, confirmation }),
+          });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || "promotion_failed");
+          await renderEvidenceSummary(item.run_id);
+        } else if (item.action === "prepare_review") {
+          await renderPromotionReview(item.run_id);
+          evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (item.action === "retry") {
+          await renderEvidenceSummary(item.run_id);
           evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
         } else if (item.action === "inspect_evidence") {
           await renderEvidenceDetails(item.run_id);

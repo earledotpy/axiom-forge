@@ -111,15 +111,9 @@ def validate_follow_up_tasks(review: dict) -> None:
 
 
 def find_committed_review(forge_root: Path, run_id: str, patch_sha256: str) -> tuple[PurePosixPath, str, dict]:
-    for candidate in (review_path_for_run(run_id), review_path_for_patch(patch_sha256)):
-        try:
-            revision = committed_review_revision(forge_root, candidate)
-        except PromotionReviewError as exc:
-            if exc.reason == "missing_promotion_review_result":
-                continue
-            raise
-        return candidate, revision, load_committed_review(forge_root, revision, candidate)
-    raise PromotionReviewError("missing_promotion_review_result")
+    candidate = review_path_for_run(run_id)
+    revision = committed_review_revision(forge_root, candidate)
+    return candidate, revision, load_committed_review(forge_root, revision, candidate)
 
 
 def validate_review(*, forge_root: Path, run_dir: Path) -> dict:
@@ -134,7 +128,7 @@ def validate_review(*, forge_root: Path, run_dir: Path) -> dict:
     if review.get("review_type") != "promotion":
         raise PromotionReviewError("malformed_promotion_review_result")
     reviewed_run_id = review.get("run_id")
-    if reviewed_run_id is not None and reviewed_run_id != run_id:
+    if reviewed_run_id != run_id:
         raise PromotionReviewError("promotion_review_run_mismatch")
     if review.get("patch_sha256") != patch_sha256:
         raise PromotionReviewError("promotion_review_patch_mismatch")
@@ -147,6 +141,8 @@ def validate_review(*, forge_root: Path, run_dir: Path) -> dict:
         raise PromotionReviewError("failing_promotion_review_result")
     concerns = review.get("concerns")
     if not isinstance(concerns, str) or not concerns:
+        raise PromotionReviewError("malformed_promotion_review_result")
+    if review.get("evidence_attestation") is not True:
         raise PromotionReviewError("malformed_promotion_review_result")
 
     validate_follow_up_tasks(review)

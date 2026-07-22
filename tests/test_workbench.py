@@ -15,6 +15,7 @@ from app.workbench import (
     IssueReference,
     WorkbenchApprovalError,
     WorkbenchExecutionError,
+    WorkbenchPromotionReviewError,
     WorkbenchVerificationError,
     WorkbenchServer,
     issue_to_draft_preview,
@@ -873,6 +874,7 @@ class TestWorkbench(unittest.TestCase):
                     'decision': 'APPROVED',
                     'concerns': 'No concerns.',
                     'follow_up_tasks': [],
+                    'evidence_attestation': True,
                 }
             ),
             encoding='utf-8',
@@ -1152,6 +1154,7 @@ class TestWorkbench(unittest.TestCase):
                 'executing',
                 'awaiting_verification',
                 'awaiting_promotion_review',
+                'awaiting_promotion',
                 'retry_decision',
                 'evidence_problems',
             ],
@@ -1225,6 +1228,7 @@ class TestWorkbench(unittest.TestCase):
                     'decision': 'APPROVED',
                     'concerns': 'No concerns.',
                     'follow_up_tasks': [],
+                    'evidence_attestation': True,
                 }
             ),
             encoding='utf-8',
@@ -1248,6 +1252,7 @@ class TestWorkbench(unittest.TestCase):
                 ('executing', 'Executing', []),
                 ('awaiting_verification', 'Awaiting verification', []),
                 ('awaiting_promotion_review', 'Verified, awaiting promotion review', []),
+                ('awaiting_promotion', 'Promotion-ready, awaiting promotion', []),
                 ('retry_decision', 'Retry decision', []),
                 ('evidence_problems', 'Evidence problems', []),
             ],
@@ -1266,6 +1271,7 @@ class TestWorkbench(unittest.TestCase):
                 ('executing', 'Executing', []),
                 ('awaiting_verification', 'Awaiting verification', []),
                 ('awaiting_promotion_review', 'Verified, awaiting promotion review', []),
+                ('awaiting_promotion', 'Promotion-ready, awaiting promotion', []),
                 ('retry_decision', 'Retry decision', []),
                 ('evidence_problems', 'Evidence problems', []),
             ],
@@ -1282,6 +1288,57 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('item.action_label', WORKBENCH_HTML)
         self.assertIn('item.action === "inspect_evidence"', WORKBENCH_HTML)
         self.assertIn('renderEvidenceDetails(item.run_id)', WORKBENCH_HTML)
+
+    def test_workbench_html_renders_a_dedicated_structured_promotion_review_form(self):
+        from app.workbench import WORKBENCH_HTML
+
+        for field in (
+            'Promotion review',
+            'Reviewer',
+            'APPROVED',
+            'CHANGES_REQUESTED',
+            'NO_CONCERNS',
+            'I attest that I reviewed the displayed run, patch, and evidence.',
+            'fetch("/api/promotion-reviews"',
+            'evidence_attestation: attestation.checked',
+        ):
+            self.assertIn(field, WORKBENCH_HTML)
+
+    def test_promotion_review_submission_commits_an_immutable_exact_run_review(self):
+        run_id = '20260722-010203-000111'
+        patch_sha256 = 'c' * 64
+        workbench, root = self.make_workbench()
+        (root / '.gitignore').write_text('runs/\n', encoding='utf-8')
+        subprocess.run(['git', '-C', str(root), 'add', '.gitignore'], check=True)
+        subprocess.run(['git', '-C', str(root), 'commit', '-q', '-m', 'Ignore captured evidence'], check=True)
+        run_dir = self.write_target_run_evidence(
+            root, run_id,
+            {'run_id': run_id, 'run_status': 'COMPLETED', 'failure_reason': None,
+             'agent': 'codex', 'run_mode': 'target', 'patch_sha256': patch_sha256},
+        )
+        run_dir.joinpath('verify.json').write_text(
+            json.dumps({'status': 'PASS', 'acceptance': {'returncode': 0}}), encoding='utf-8'
+        )
+
+        preparation = workbench.prepare_promotion_review({'run_id': run_id})
+        self.assertEqual(preparation.patch_sha256, patch_sha256)
+        submission = workbench.submit_promotion_review({
+            'run_id': run_id, 'patch_sha256': patch_sha256, 'reviewer': 'operator',
+            'decision': 'APPROVED', 'concerns': 'NO_CONCERNS', 'follow_up_tasks': [],
+            'evidence_attestation': True,
+        })
+
+        review_path = root / 'reviews' / 'promotion' / f'{run_id}.json'
+        self.assertEqual(submission.run_id, run_id)
+        self.assertTrue(review_path.is_file())
+        self.assertEqual(json.loads(review_path.read_text(encoding='utf-8'))['patch_sha256'], patch_sha256)
+        with self.assertRaises(WorkbenchPromotionReviewError) as caught:
+            workbench.submit_promotion_review({
+                'run_id': run_id, 'patch_sha256': patch_sha256, 'reviewer': 'operator',
+                'decision': 'APPROVED', 'concerns': 'NO_CONCERNS', 'follow_up_tasks': [],
+                'evidence_attestation': True,
+            })
+        self.assertEqual(str(caught.exception), 'promotion_review_already_exists')
 
     def test_workbench_html_hosts_planning_sessions_and_zero_authority_proposal_handoff(self):
         from app.workbench import WORKBENCH_HTML

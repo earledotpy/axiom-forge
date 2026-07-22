@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 from app.workbench_html import WORKBENCH_HTML
-from app.workbench_models import WorkbenchApprovalError, WorkbenchExecutionError, WorkbenchVerificationError
+from app.workbench_models import (WorkbenchApprovalError, WorkbenchExecutionError, WorkbenchPromotionError, WorkbenchPromotionReviewError, WorkbenchVerificationError)
 from app.planning_sessions import PlanningSessionError
 from app.workbench_runtime import WorkbenchServer
 
@@ -30,6 +30,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/api/decision-queue":
                 self._handle_decision_queue()
+                return
+            if parsed.path.startswith("/api/promotion-reviews/"):
+                self._handle_promotion_review_prepare(parsed.path)
                 return
             if parsed.path == "/api/live-run":
                 self._handle_live_run(parsed.query)
@@ -58,6 +61,12 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
             if parsed.path == "/api/retry":
                 self._handle_retry()
+                return
+            if parsed.path == "/api/promotion-reviews":
+                self._handle_promotion_review_submit()
+                return
+            if parsed.path == "/api/promote":
+                self._handle_promote()
                 return
             if parsed.path == "/api/verify":
                 self._handle_verify()
@@ -174,6 +183,35 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
         def _handle_decision_queue(self) -> None:
             self._write_json(asdict(workbench.operator_decision_queue()))
 
+        def _handle_promotion_review_prepare(self, path: str) -> None:
+            match = re.fullmatch(r"/api/promotion-reviews/([0-9]{8}-[0-9]{6}-[0-9]+)", path)
+            if not match:
+                self._write_json({"error": "invalid_captured_run_reference"}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                self._write_json(asdict(workbench.prepare_promotion_review({"run_id": match.group(1)})))
+            except (WorkbenchPromotionReviewError, WorkbenchVerificationError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+        def _handle_promotion_review_submit(self) -> None:
+            try:
+                payload = self._read_bounded_json("invalid_promotion_review_submission")
+                self._write_json(asdict(workbench.submit_promotion_review(payload)), HTTPStatus.CREATED)
+            except (UnicodeDecodeError, ValueError, WorkbenchPromotionReviewError, WorkbenchVerificationError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+        def _handle_promote(self) -> None:
+            try:
+                payload = self._read_bounded_json("invalid_promotion_confirmation")
+                self._write_json(asdict(workbench.confirm_promotion(payload)), HTTPStatus.CREATED)
+            except (UnicodeDecodeError, ValueError, WorkbenchPromotionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+        def _read_bounded_json(self, reason: str) -> object:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            if content_length < 1 or content_length > 1_000_000:
+                raise ValueError(reason)
+            return json.loads(self.rfile.read(content_length).decode("utf-8"))
         def _handle_live_run(self, query: str) -> None:
             if query:
                 self._write_json({"error": "invalid_live_run_request"}, HTTPStatus.BAD_REQUEST)

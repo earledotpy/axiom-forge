@@ -45,6 +45,7 @@ class PromotionReviewTests(unittest.TestCase):
             "decision": "APPROVED",
             "concerns": "NO_CONCERNS",
             "follow_up_tasks": [],
+            "evidence_attestation": True,
         }
         review.update(overrides)
         path = self.root / "reviews" / "promotion" / f"{run_id}.json"
@@ -64,7 +65,7 @@ class PromotionReviewTests(unittest.TestCase):
         self.assertEqual(result["path"], "reviews/promotion/run-ok.json")
         self.assertRegex(result["revision"], r"^[0-9a-f]{40}$")
 
-    def test_patch_level_review_can_approve_dynamic_run_id(self):
+    def test_patch_level_review_cannot_approve_dynamic_run_id(self):
         dynamic_run_id = "run-dynamic"
         self.write_record(dynamic_run_id, self.patch_sha)
         path = self.root / "reviews" / "promotion" / f"patch-{self.patch_sha}.json"
@@ -76,13 +77,15 @@ class PromotionReviewTests(unittest.TestCase):
             "decision": "APPROVED",
             "concerns": "NO_CONCERNS",
             "follow_up_tasks": [],
+            "evidence_attestation": True,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.root), "add", str(path.relative_to(self.root))], check=True)
         subprocess.run(["git", "-C", str(self.root), "commit", "-q", "-m", "patch review"], check=True)
-        result = validate_review(forge_root=self.root, run_dir=self.root / "runs" / dynamic_run_id)
-        self.assertEqual(result["path"], f"reviews/promotion/patch-{self.patch_sha}.json")
+        with self.assertRaises(PromotionReviewError) as caught:
+            validate_review(forge_root=self.root, run_dir=self.root / "runs" / dynamic_run_id)
+        self.assertEqual(caught.exception.reason, "missing_promotion_review_result")
 
 
     def test_missing_review_fails_closed(self):

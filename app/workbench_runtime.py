@@ -22,8 +22,9 @@ from app.workbench_models import (
     DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorDecisionQueue,
     OperatorDecisionQueueItem, OperatorDecisionQueueStage, OperatorEvidenceDetails,
-    OperatorEvidenceSummary, TargetRunner, VerificationRunner, WorkbenchApprovalError,
-    WorkbenchExecutionError, WorkbenchVerificationError,
+    OperatorEvidenceSummary, PromotionResult, PromotionReviewPreparation, PromotionReviewSubmission,
+    TargetRunner, VerificationRunner, WorkbenchApprovalError, WorkbenchExecutionError,
+    WorkbenchPromotionError, WorkbenchPromotionReviewError, WorkbenchVerificationError,
 )
 
 class WorkbenchServer:
@@ -43,6 +44,8 @@ class WorkbenchServer:
         self._verification_runner = verification_runner or _run_target_mode_verifier
         self._active_delegation_lock = Lock()
         self._active_delegation: tuple[str, str] | None = None
+        self._active_promotion_lock = Lock()
+        self._active_promotion: str | None = None
         self.planning_sessions = planning_sessions
 
     def start_planning_session(self, payload: object) -> dict:
@@ -159,6 +162,73 @@ class WorkbenchServer:
         task_file = _retry_execution_target(self.forge_root, retry.run_id)
         return self._run_confirmed_delegation(task_file, retry.adapter)
 
+    def prepare_promotion_review(self, payload: object) -> PromotionReviewPreparation:
+        run_id = _parse_promotion_run_request(payload, "invalid_promotion_review_request")
+        run_dir = _captured_run_directory(self.forge_root, run_id)
+        evidence = _run_evidence(self.forge_root, run_dir)
+        if evidence["state"] != "verified":
+            raise WorkbenchPromotionReviewError("captured_run_not_awaiting_promotion_review")
+        record = _evidence_json(run_dir / "record.json")
+        patch_sha256 = record.get("patch_sha256")
+        if not isinstance(patch_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", patch_sha256):
+            raise WorkbenchPromotionReviewError("promotion_review_patch_identity_unavailable")
+        reviewer_hint = _git_config_value(self.forge_root, "user.name")
+        email = _git_config_value(self.forge_root, "user.email")
+        if reviewer_hint and email:
+            reviewer_hint = f"{reviewer_hint} <{email}>"
+        problems = ["stale_delegation_target_base"] if evidence["target"]["stale_base"] else []
+        return PromotionReviewPreparation("promotion_review_preparation", run_id, patch_sha256, _task_intent_from_evidence(run_dir), evidence["evidence_revisions"]["delegation_artifact_revision"], evidence["task"]["approved_paths"], evidence["run"]["adapter"] or "missing_adapter", evidence["target"], evidence["patch"]["changed_paths"], _evidence_text(run_dir / "patch.diff"), evidence["verification"], evidence["acceptance"]["status"], problems, reviewer_hint)
+
+    def submit_promotion_review(self, payload: object) -> PromotionReviewSubmission:
+        request = _parse_promotion_review_submission(payload)
+        run_dir = _captured_run_directory(self.forge_root, request["run_id"])
+        path = self.forge_root / "reviews" / "promotion" / f"{request['run_id']}.json"
+        _require_clean_promotion_review_repo(self.forge_root)
+        if path.exists() or run_git(self.forge_root, "cat-file", "-e", f"HEAD:{path.relative_to(self.forge_root).as_posix()}").returncode == 0:
+            raise WorkbenchPromotionReviewError("promotion_review_already_exists")
+        preparation = self.prepare_promotion_review({"run_id": request["run_id"]})
+        if request["patch_sha256"] != preparation.patch_sha256:
+            raise WorkbenchPromotionReviewError("promotion_review_patch_mismatch")
+        if request["decision"] == "APPROVED" and preparation.evidence_problems:
+            raise WorkbenchPromotionReviewError(preparation.evidence_problems[0])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {"schema_version": 1, "review_type": "promotion", **request}
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        repo_path = path.relative_to(self.forge_root).as_posix()
+        try:
+            _run_git_review(self.forge_root, ["add", "--", repo_path], "promotion_review_stage_failed")
+            _run_git_review(self.forge_root, ["commit", "-m", f"Record promotion review for {request['run_id']}"], "promotion_review_commit_failed")
+        except Exception:
+            run_git(self.forge_root, "restore", "--staged", "--", repo_path)
+            path.unlink(missing_ok=True)
+            raise
+        revision = _git_output_review(self.forge_root, ["rev-parse", "HEAD"], "promotion_review_revision_unresolved")
+        return PromotionReviewSubmission("promotion_review_submission", request["run_id"], request["decision"], revision)
+
+    def confirm_promotion(self, payload: object) -> PromotionResult:
+        run_id = _parse_promotion_confirmation(payload)
+        with self._active_delegation_lock:
+            if self._active_delegation is not None:
+                raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
+        with self._active_promotion_lock:
+            if self._active_promotion is not None:
+                raise WorkbenchPromotionError("active_promotion_in_progress")
+            self._active_promotion = run_id
+        try:
+            run_dir = _captured_run_directory(self.forge_root, run_id)
+            record = _evidence_json(run_dir / "record.json")
+            command = ["bash", str(self.forge_root / "scripts" / "promote.sh")]
+            if record.get("run_mode") == "target":
+                command.append("--target")
+            command.append(run_dir.relative_to(self.forge_root).as_posix())
+            subprocess.run(command, cwd=self.forge_root, text=True, input=run_id + "\n", capture_output=True, check=False)
+            promotion = _evidence_json(run_dir / "promotion.json")
+            return PromotionResult("promotion", run_id, "promoted" if promotion.get("status") == "PROMOTED" else "failed", promotion.get("reason") if isinstance(promotion.get("reason"), str) else "promotion_failed", promotion.get("branch") if isinstance(promotion.get("branch"), str) else None, promotion.get("promotion_commit") if isinstance(promotion.get("promotion_commit"), str) else None, promotion.get("promotion_review_revision") if isinstance(promotion.get("promotion_review_revision"), str) else None)
+        except WorkbenchVerificationError as error:
+            raise WorkbenchPromotionError(str(error)) from error
+        finally:
+            with self._active_promotion_lock:
+                self._active_promotion = None
     def live_run(self) -> dict:
         state_path = self.forge_root / "runs" / ".live-run.json"
         if not state_path.is_file():
@@ -270,6 +340,7 @@ class WorkbenchServer:
         )
         awaiting_verification: list[OperatorDecisionQueueItem] = []
         awaiting_promotion_review: list[OperatorDecisionQueueItem] = []
+        awaiting_promotion: list[OperatorDecisionQueueItem] = []
         retry_decision: list[OperatorDecisionQueueItem] = []
         evidence_problems: list[OperatorDecisionQueueItem] = []
 
@@ -289,6 +360,8 @@ class WorkbenchServer:
                 awaiting_verification.append(_verification_queue_item(summary, task_file))
             elif summary.verification_result == "PASS" and run.state == "verified":
                 awaiting_promotion_review.append(_promotion_review_queue_item(summary, task_file))
+            elif run.state == "promotion-ready":
+                awaiting_promotion.append(_promotion_queue_item(summary, task_file))
 
         return OperatorDecisionQueue(
             authority="operator_decision_queue",
@@ -306,6 +379,7 @@ class WorkbenchServer:
                     "Verified, awaiting promotion review",
                     awaiting_promotion_review,
                 ),
+                OperatorDecisionQueueStage("awaiting_promotion", "Promotion-ready, awaiting promotion", awaiting_promotion),
                 OperatorDecisionQueueStage("retry_decision", "Retry decision", retry_decision),
                 OperatorDecisionQueueStage("evidence_problems", "Evidence problems", evidence_problems),
             ],
@@ -519,6 +593,76 @@ def _captured_run_from_runner_result(
         run_status=record["run_status"],
         failure_reason=failure_reason,
     )
+
+def _parse_promotion_run_request(payload: object, reason: str) -> str:
+    if not isinstance(payload, dict) or set(payload) != {"run_id"}:
+        raise WorkbenchPromotionReviewError(reason)
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise WorkbenchPromotionReviewError("invalid_captured_run_reference")
+    return run_id
+
+
+def _parse_promotion_review_submission(payload: object) -> dict[str, object]:
+    required = {"run_id", "patch_sha256", "reviewer", "decision", "concerns", "follow_up_tasks", "evidence_attestation"}
+    if not isinstance(payload, dict) or set(payload) != required:
+        raise WorkbenchPromotionReviewError("invalid_promotion_review_submission")
+    run_id = payload["run_id"]
+    patch = payload["patch_sha256"]
+    reviewer = payload["reviewer"]
+    decision = payload["decision"]
+    concerns = payload["concerns"]
+    followups = payload["follow_up_tasks"]
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id) or not isinstance(patch, str) or not re.fullmatch(r"[0-9a-f]{64}", patch):
+        raise WorkbenchPromotionReviewError("invalid_promotion_review_identity")
+    if not isinstance(reviewer, str) or not reviewer.strip() or not isinstance(concerns, str) or not concerns.strip() or payload["evidence_attestation"] is not True:
+        raise WorkbenchPromotionReviewError("invalid_promotion_review_attestation")
+    if decision not in {"APPROVED", "CHANGES_REQUESTED"}:
+        raise WorkbenchPromotionReviewError("invalid_promotion_review_decision")
+    if not isinstance(followups, list):
+        raise WorkbenchPromotionReviewError("invalid_promotion_review_followups")
+    if decision == "APPROVED" and followups:
+        raise WorkbenchPromotionReviewError("approved_promotion_review_has_followups")
+    if decision == "CHANGES_REQUESTED":
+        if concerns.strip() == "NO_CONCERNS" or not followups:
+            raise WorkbenchPromotionReviewError("changes_requested_followups_required")
+        for task in followups:
+            if not isinstance(task, dict) or not isinstance(task.get("issue_reference"), str) or not re.fullmatch(r"https://github.com/[^/]+/[^/]+/issues/[1-9][0-9]*", task["issue_reference"]):
+                raise WorkbenchPromotionReviewError("issue_anchored_followups_required")
+    return dict(payload)
+
+
+def _parse_promotion_confirmation(payload: object) -> str:
+    if not isinstance(payload, dict) or set(payload) != {"run_id", "confirmation"}:
+        raise WorkbenchPromotionError("invalid_promotion_confirmation")
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise WorkbenchPromotionError("invalid_captured_run_reference")
+    if payload.get("confirmation") != run_id:
+        raise WorkbenchPromotionError("exact_promotion_confirmation_required")
+    return run_id
+
+
+def _require_clean_promotion_review_repo(root: Path) -> None:
+    if run_git(root, "status", "--porcelain").stdout.strip():
+        raise WorkbenchPromotionReviewError("forge_repo_dirty")
+
+
+def _git_config_value(root: Path, key: str) -> str | None:
+    result = run_git(root, "config", "--get", key)
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and value else None
+
+
+def _git_output_review(root: Path, args: list[str], reason: str) -> str:
+    result = run_git(root, *args)
+    if result.returncode != 0:
+        raise WorkbenchPromotionReviewError(reason)
+    return result.stdout.strip()
+
+
+def _run_git_review(root: Path, args: list[str], reason: str) -> None:
+    _git_output_review(root, args, reason)
 
 def _parse_verification_request(payload: object) -> str:
     if not isinstance(payload, dict) or set(payload) != {"run_id"}:
@@ -784,6 +928,17 @@ def _promotion_review_queue_item(summary: OperatorEvidenceSummary, task_file: st
         include_review_evidence=True,
     )
 
+
+def _promotion_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
+    return _run_queue_item(
+        summary,
+        task_file,
+        stage="awaiting_promotion",
+        decision_label="Promotion-ready, awaiting promotion",
+        action_label="Promote…",
+        action="promote",
+        include_review_evidence=True,
+    )
 
 def _retry_queue_item(summary: OperatorEvidenceSummary, task_file: str | None) -> OperatorDecisionQueueItem:
     return _run_queue_item(
