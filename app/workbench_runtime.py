@@ -42,6 +42,7 @@ class WorkbenchServer:
         self.forge_root = (forge_root or Path.cwd()).resolve()
         self._target_runner = target_runner or _run_target_mode_runner
         self._verification_runner = verification_runner or _run_target_mode_verifier
+        self._operation_lock = Lock()
         self._active_delegation_lock = Lock()
         self._active_delegation: tuple[str, str] | None = None
         self._active_promotion_lock = Lock()
@@ -207,13 +208,15 @@ class WorkbenchServer:
 
     def confirm_promotion(self, payload: object) -> PromotionResult:
         run_id = _parse_promotion_confirmation(payload)
-        with self._active_delegation_lock:
+        with self._operation_lock:
             if self._active_delegation is not None:
                 raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
-        with self._active_promotion_lock:
             if self._active_promotion is not None:
                 raise WorkbenchPromotionError("active_promotion_in_progress")
             self._active_promotion = run_id
+        with self._active_delegation_lock:
+            if self._active_delegation is not None:
+                raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
         try:
             run_dir = _captured_run_directory(self.forge_root, run_id)
             record = _evidence_json(run_dir / "record.json")
@@ -227,7 +230,7 @@ class WorkbenchServer:
         except WorkbenchVerificationError as error:
             raise WorkbenchPromotionError(str(error)) from error
         finally:
-            with self._active_promotion_lock:
+            with self._operation_lock:
                 self._active_promotion = None
     def live_run(self) -> dict:
         state_path = self.forge_root / "runs" / ".live-run.json"
@@ -266,7 +269,9 @@ class WorkbenchServer:
             adapter,
             task_file,
         ]
-        with self._active_delegation_lock:
+        with self._operation_lock:
+            if self._active_promotion is not None:
+                raise WorkbenchExecutionError("active_promotion_in_progress")
             if self._active_delegation:
                 raise WorkbenchExecutionError("active_workbench_delegation_in_progress")
             self._active_delegation = (task_file, adapter)
@@ -275,7 +280,7 @@ class WorkbenchServer:
         except OSError as error:
             raise WorkbenchExecutionError("target_mode_runner_start_failed") from error
         finally:
-            with self._active_delegation_lock:
+            with self._operation_lock:
                 self._active_delegation = None
 
         return _captured_run_from_runner_result(self.forge_root, result)
@@ -627,7 +632,12 @@ def _parse_promotion_review_submission(payload: object) -> dict[str, object]:
         if concerns.strip() == "NO_CONCERNS" or not followups:
             raise WorkbenchPromotionReviewError("changes_requested_followups_required")
         for task in followups:
-            if not isinstance(task, dict) or not isinstance(task.get("issue_reference"), str) or not re.fullmatch(r"https://github.com/[^/]+/[^/]+/issues/[1-9][0-9]*", task["issue_reference"]):
+            if not isinstance(task, dict) or task.get("kind") != "bounded_patch_task":
+                raise WorkbenchPromotionReviewError("issue_anchored_followups_required")
+            required_task_fields = ("task_file", "task_text", "target_scope", "acceptance_check", "adapter", "issue_reference")
+            if any(not isinstance(task.get(field), str) or not task[field].strip() for field in required_task_fields):
+                raise WorkbenchPromotionReviewError("issue_anchored_followups_required")
+            if not re.fullmatch(r"https://github.com/[^/]+/[^/]+/issues/[1-9][0-9]*", task["issue_reference"]):
                 raise WorkbenchPromotionReviewError("issue_anchored_followups_required")
     return dict(payload)
 

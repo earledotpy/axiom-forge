@@ -99,6 +99,11 @@ def validate_follow_up_tasks(review: dict) -> None:
         task_file = task.get("task_file")
         if kind != "bounded_patch_task" or not isinstance(task_file, str):
             raise PromotionReviewError("unresolved_promotion_review_followups")
+        required_fields = ("task_text", "target_scope", "acceptance_check", "adapter", "issue_reference")
+        if any(not isinstance(task.get(field), str) or not task[field].strip() for field in required_fields):
+            raise PromotionReviewError("unresolved_promotion_review_followups")
+        if not re.fullmatch(r"https://github.com/[^/]+/[^/]+/issues/[1-9][0-9]*", task["issue_reference"]):
+            raise PromotionReviewError("unresolved_promotion_review_followups")
         pure = PurePosixPath(task_file)
         if (
             "\\" in task_file
