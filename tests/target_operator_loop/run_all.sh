@@ -8,6 +8,7 @@ PASS_COUNT=0
 FAIL_COUNT=0
 TMPDIR="$(mktemp -d)"
 GATE_BACKUP="$(mktemp)"
+FORGE_HEAD_BEFORE=""
 cp gate.toml "$GATE_BACKUP"
 
 pass() {
@@ -27,6 +28,9 @@ hide_gate_config_change() {
 cleanup() {
   git update-index --no-skip-worktree gate.toml >/dev/null 2>&1 || true
   cp "$GATE_BACKUP" gate.toml
+  if [[ -n "$FORGE_HEAD_BEFORE" ]]; then
+    git reset --hard "$FORGE_HEAD_BEFORE" >/dev/null 2>&1 || true
+  fi
   rm -f "$GATE_BACKUP"
   rm -rf "$TMPDIR"
 }
@@ -109,6 +113,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
   git status --short >&2
   exit 1
 fi
+
+FORGE_HEAD_BEFORE="$(git rev-parse HEAD)"
 
 TARGET_REPO="$TMPDIR/target"
 make_target_repo "$TARGET_REPO"
@@ -209,9 +215,39 @@ PY
     cat "runs/$RUN_ID/verify.json" >&2
   fi
 
-  expect_pass \
-    "L8_target_promotion_succeeds_with_explicit_flag" \
-    bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+  if python - "runs/$RUN_ID/record.json" "reviews/promotion/$RUN_ID.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+record = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+review = {
+    "schema_version": 1,
+    "review_type": "promotion",
+    "run_id": record["run_id"],
+    "patch_sha256": record["patch_sha256"],
+    "reviewer": "target-operator-loop",
+    "decision": "APPROVED",
+    "concerns": "Target operator loop fixture review.",
+    "evidence_attestation": True,
+    "follow_up_tasks": [],
+}
+path = Path(sys.argv[2])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
+PY
+  then
+    if git add "reviews/promotion/$RUN_ID.json" \
+      && git -c user.name="Axiom Test" -c user.email="test@example.invalid" commit -q -m "Add target operator loop promotion review"; then
+      expect_pass \
+        "L8_target_promotion_succeeds_with_explicit_flag" \
+        bash -c "printf '$RUN_ID\n' | bash scripts/promote.sh --target 'runs/$RUN_ID'"
+    else
+      fail "L8_target_promotion_succeeds_with_explicit_flag"
+    fi
+  else
+    fail "L8_target_promotion_succeeds_with_explicit_flag"
+  fi
 
   if git -C "$TARGET_REPO" show-ref --verify --quiet "refs/heads/gate/$RUN_ID"; then
     pass "L9_gate_branch_created_in_external_target_repository"
