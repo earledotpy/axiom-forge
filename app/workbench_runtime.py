@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -580,13 +581,42 @@ def _run_target_mode_runner(command: list[str], root: Path) -> subprocess.Comple
     return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
 
 
+_RUNNER_DIAGNOSTIC_TAIL_LIMIT = 1900
+
+
+def _environment_secret_values() -> list[str]:
+    markers = ("TOKEN", "SECRET", "PASSWORD", "API_KEY")
+    return [
+        value
+        for name, value in os.environ.items()
+        if any(marker in name.upper() for marker in markers) and value
+    ]
+
+
+def _runner_diagnostic_tail(result: subprocess.CompletedProcess[str]) -> str:
+    output = result.stderr or result.stdout or ""
+    for secret in _environment_secret_values():
+        output = output.replace(secret, "[REDACTED]")
+    scrubbed = re.sub(
+        r'(?im)(["\']?[\w.-]*(?:token|secret|password|api[_-]?key)[\w.-]*["\']?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\r\n]*)',
+        r"\1[REDACTED]",
+        output,
+    )
+    scrubbed = re.sub(r'(?im)(["\']?authorization["\']?\s*[:=]\s*)(?:"[^"]*"|\'[^\']*\'|[^\r\n]*)', r"\1[REDACTED]", scrubbed)
+    if len(scrubbed) > _RUNNER_DIAGNOSTIC_TAIL_LIMIT:
+        return "...[truncated]\n" + scrubbed[-_RUNNER_DIAGNOSTIC_TAIL_LIMIT:]
+    return scrubbed
+
+
 def _captured_run_from_runner_result(
     root: Path, result: subprocess.CompletedProcess[str]
 ) -> CapturedRun:
     output = f"{result.stdout}\n{result.stderr}"
     match = re.search(r"^RUN_(?:CAPTURED|FAILED): ([0-9]{8}-[0-9]{6}-[0-9]+)$", output, re.MULTILINE)
     if not match:
-        raise WorkbenchExecutionError("target_mode_runner_did_not_capture_run")
+        diagnostic = _runner_diagnostic_tail(result)
+        reason = "target_mode_runner_did_not_capture_run"
+        raise WorkbenchExecutionError(f"{reason}: {diagnostic}" if diagnostic else reason)
 
     run_id = match.group(1)
     record_path = root / "runs" / run_id / "record.json"

@@ -330,6 +330,29 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(str(caught.exception), "operator_execution_confirmation_required")
         self.assertEqual(calls, [])
 
+    def test_execution_surfaces_a_bounded_scrubbed_runner_diagnostic_without_a_capture_sentinel(self):
+        def target_runner(command, root):
+            return subprocess.CompletedProcess(
+                command,
+                127,
+                "early stdout\n",
+                "x" * 4096 + "\nOPENAI_API_KEY=sk-openai-secret\nAuthorization: Basic basic-secret\nAuthorization=Bearer equals-secret\n{\"Authorization\": \"Bearer bearer-secret\"}\n{\"access_token\": \"json-secret\"}\npassword: \"secret with spaces\"\n",
+            )
+
+        workbench, _ = self.make_workbench(target_runner=target_runner)
+        self.approve_delegation(workbench)
+
+        with self.assertRaises(WorkbenchExecutionError) as caught:
+            workbench.execute_confirmed_delegation(self.execute_payload())
+
+        message = str(caught.exception)
+        self.assertTrue(message.startswith("target_mode_runner_did_not_capture_run: "))
+        for secret in ("sk-openai-secret", "basic-secret", "equals-secret", "bearer-secret", "json-secret", "secret with spaces"):
+            self.assertNotIn(secret, message)
+        self.assertIn("[REDACTED]", message)
+        self.assertLessEqual(len(message), 2048)
+
+
     def test_execution_rejects_generic_command_requests_without_starting_a_runner(self):
         calls = []
         workbench, _ = self.make_workbench(target_runner=lambda command, root: calls.append(command))
