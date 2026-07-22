@@ -1,4 +1,4 @@
-WORKBENCH_HTML = """<!doctype html>
+WORKBENCH_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -163,6 +163,17 @@ WORKBENCH_HTML = """<!doctype html>
     }
     .queue-card .meta { font-family: Consolas, "Liberation Mono", monospace; margin-top: 6px; }
     .queue-card button { margin-top: 10px; }
+    .queue-card.planning-default-proposal { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .planning-transcript {
+      min-height: 180px;
+      max-height: 420px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 12px;
+    }
     @media (max-width: 820px) {
       main, .grid {
         display: block;
@@ -202,8 +213,40 @@ WORKBENCH_HTML = """<!doctype html>
           <h2>Operator decision queue</h2>
           <p class="meta">Nothing awaiting a decision is invisible. This queue is re-derived from Forge-owned delegation artifacts and captured evidence each time it loads.</p>
           <button id="start-draft-button" type="button">Prepare a new task</button>
+          <button id="start-planning-button" type="button">Start planning session</button>
         </div>
         <div id="decision-queue-stages" class="meta">Loading operator decisions…</div>
+      </div>
+      <div id="live-run" class="issue hidden">
+        <h2>Live active delegation</h2>
+        <p id="live-run-status" class="meta">Display-only raw output; captured evidence remains authoritative.</p>
+        <h3>stdout</h3><pre id="live-run-stdout"></pre>
+        <h3>stderr</h3><pre id="live-run-stderr"></pre>
+      </div>
+      <div id="planning-workflow" class="hidden">
+        <div class="issue">
+          <h2>Planning sessions</h2>
+          <p class="meta">Planning can investigate a disposable target worktree but grants no authority to edit, delegate, approve, or promote.</p>
+          <div class="grid">
+            <div><label for="planning-adapter">Planning driver</label><select id="planning-adapter"><option>codex</option><option>claude-code</option></select></div>
+            <div><label for="planning-target">Target repository</label><input id="planning-target" placeholder="C:\path\to\target-repo"></div>
+            <div class="full"><label for="planning-issue-seed">Optional GitHub issue seed</label><input id="planning-issue-seed" placeholder="100 or issue URL"></div>
+            <div class="full"><label for="planning-prompt">Planning prompt</label><textarea id="planning-prompt"></textarea></div>
+          </div>
+          <button id="create-planning-session" type="button">Start investigation-only session</button>
+        </div>
+        <div class="grid">
+          <div><h3>Sessions</h3><div id="planning-session-list" class="meta">Loading sessions…</div></div>
+          <div>
+            <h3 id="planning-session-heading">Select a session</h3>
+            <div id="planning-transcript" class="planning-transcript meta"></div>
+            <label for="planning-message">Operator reply</label>
+            <textarea id="planning-message"></textarea>
+            <button id="send-planning-message" type="button">Send planning reply</button>
+            <button id="close-planning-session" type="button">Close planning session</button>
+            <div id="planning-proposals"></div>
+          </div>
+        </div>
       </div>
       <div id="draft-workflow" class="hidden">
       <div id="empty" class="meta">Load a GitHub Issue to prepare a draft task artifact.</div>
@@ -268,11 +311,22 @@ WORKBENCH_HTML = """<!doctype html>
     const runHistory = document.querySelector("#run-history");
     const decisionQueue = document.querySelector("#decision-queue");
     const decisionQueueStages = document.querySelector("#decision-queue-stages");
+    const liveRun = document.querySelector("#live-run");
+    const liveRunStatus = document.querySelector("#live-run-status");
+    const liveRunStdout = document.querySelector("#live-run-stdout");
+    const liveRunStderr = document.querySelector("#live-run-stderr");
     const draftWorkflow = document.querySelector("#draft-workflow");
     const startDraftButton = document.querySelector("#start-draft-button");
+    const planningWorkflow = document.querySelector("#planning-workflow");
+    const startPlanningButton = document.querySelector("#start-planning-button");
+    const planningSessionList = document.querySelector("#planning-session-list");
+    const planningTranscript = document.querySelector("#planning-transcript");
     const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
     let loadedIssue = null;
     let approvedDelegation = null;
+    let selectedPlanningSession = null;
+    let selectedPlanningProposal = null;
+    let liveRunPoll = null;
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -286,6 +340,7 @@ WORKBENCH_HTML = """<!doctype html>
           throw new Error(payload.error || "draft_load_failed");
         }
         renderPreview(payload);
+        if (selectedPlanningProposal) applyPlanningProposal(selectedPlanningProposal.proposal);
       } catch (loadError) {
         error.textContent = loadError.message;
         error.classList.remove("hidden");
@@ -347,6 +402,8 @@ WORKBENCH_HTML = """<!doctype html>
             acceptance_check: document.querySelector("#acceptance-check").value,
             adapter: document.querySelector("#adapter").value,
             approved: approvalConfirmation.checked,
+            planning_session_id: selectedPlanningProposal ? selectedPlanningProposal.session_id : null,
+            planning_proposal_version: selectedPlanningProposal ? selectedPlanningProposal.version : null,
           }),
         });
         const payload = await response.json();
@@ -378,7 +435,7 @@ WORKBENCH_HTML = """<!doctype html>
 
       runButton.disabled = true;
       try {
-        const response = await fetch("/api/run", {
+        const runRequest = fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -386,6 +443,8 @@ WORKBENCH_HTML = """<!doctype html>
             confirmed: executionConfirmation.checked,
           }),
         });
+        pollLiveRun();
+        const response = await runRequest;
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload.error || "target_mode_run_failed");
@@ -403,6 +462,23 @@ WORKBENCH_HTML = """<!doctype html>
         runButton.disabled = false;
       }
     });
+    async function pollLiveRun() {
+      const response = await fetch("/api/live-run");
+      const payload = await response.json();
+      if (!response.ok) return;
+      liveRun.classList.remove("hidden");
+      liveRunStatus.textContent = payload.reason || payload.state;
+      if (payload.state === "active") {
+        liveRunStdout.textContent = payload.stdout.text;
+        liveRunStderr.textContent = payload.stderr.text;
+        liveRunPoll = setTimeout(pollLiveRun, 1000);
+      } else if (payload.state === "unavailable") {
+        liveRunPoll = setTimeout(pollLiveRun, 1000);
+      } else if (payload.state === "terminal" || payload.state === "inactive") {
+        await renderDecisionQueue();
+        await renderHistoricalRuns();
+      }
+    }
     async function renderEvidenceSummary(runId, verify = false, readOnly = false) {
       const response = await fetch(verify ? "/api/verify" : `/api/runs/${runId}`, {
         method: verify ? "POST" : "GET",
@@ -572,6 +648,11 @@ WORKBENCH_HTML = """<!doctype html>
         } else if (item.action === "inspect_evidence") {
           await renderEvidenceDetails(item.run_id);
           evidenceSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else if (item.action === "review_planning_proposal") {
+          decisionQueue.classList.add("hidden");
+          draftWorkflow.classList.add("hidden");
+          planningWorkflow.classList.remove("hidden");
+          await selectPlanningSession(item.planning_session_id);
         } else {
           throw new Error(item.evidence_error || "captured_run_evidence_unavailable");
         }
@@ -627,9 +708,191 @@ WORKBENCH_HTML = """<!doctype html>
 
     startDraftButton.addEventListener("click", () => {
       draftWorkflow.classList.remove("hidden");
+      planningWorkflow.classList.add("hidden");
       decisionQueue.classList.add("hidden");
       document.querySelector("#issue-input").focus();
     });
+
+    startPlanningButton.addEventListener("click", async () => {
+      decisionQueue.classList.add("hidden");
+      draftWorkflow.classList.add("hidden");
+      planningWorkflow.classList.remove("hidden");
+      await renderPlanningSessions();
+    });
+
+    document.querySelector("#create-planning-session").addEventListener("click", async () => {
+      error.classList.add("hidden");
+      const issueSeed = document.querySelector("#planning-issue-seed").value.trim();
+      const request = {
+        adapter: document.querySelector("#planning-adapter").value,
+        target_repo: document.querySelector("#planning-target").value,
+        prompt: document.querySelector("#planning-prompt").value,
+      };
+      if (issueSeed) request.issue_seed = issueSeed;
+      try {
+        const response = await fetch("/api/planning-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "planning_session_start_failed");
+        selectedPlanningSession = payload;
+        renderSelectedPlanningSession(payload);
+        await renderPlanningSessions();
+      } catch (planningError) {
+        error.textContent = planningError.message;
+        error.classList.remove("hidden");
+      }
+    });
+
+    document.querySelector("#send-planning-message").addEventListener("click", async () => {
+      if (!selectedPlanningSession) return;
+      const response = await fetch(`/api/planning-sessions/${selectedPlanningSession.session_id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: document.querySelector("#planning-message").value }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        error.textContent = payload.error || "planning_message_failed";
+        error.classList.remove("hidden");
+        return;
+      }
+      document.querySelector("#planning-message").value = "";
+      selectedPlanningSession = payload;
+      renderSelectedPlanningSession(payload);
+    });
+
+    document.querySelector("#close-planning-session").addEventListener("click", async () => {
+      if (!selectedPlanningSession) return;
+      const response = await fetch(`/api/planning-sessions/${selectedPlanningSession.session_id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        error.textContent = payload.error || "planning_close_failed";
+        error.classList.remove("hidden");
+        return;
+      }
+      selectedPlanningSession = payload;
+      renderSelectedPlanningSession(payload);
+      await renderPlanningSessions();
+    });
+
+    async function renderPlanningSessions() {
+      const response = await fetch("/api/planning-sessions");
+      const payload = await response.json();
+      if (!response.ok) {
+        planningSessionList.textContent = payload.error || "planning_sessions_unavailable";
+        return;
+      }
+      planningSessionList.replaceChildren();
+      if (!payload.sessions.length) {
+        planningSessionList.textContent = "No planning sessions yet.";
+        return;
+      }
+      payload.sessions.forEach((session) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = session.adapter + " · " + session.state + " · " + session.session_id.slice(0, 8);
+        button.addEventListener("click", () => selectPlanningSession(session.session_id));
+        planningSessionList.append(button);
+      });
+    }
+
+    async function selectPlanningSession(sessionId) {
+      const response = await fetch("/api/planning-sessions/" + sessionId);
+      const payload = await response.json();
+      if (!response.ok) {
+        error.textContent = payload.error || "planning_session_unavailable";
+        error.classList.remove("hidden");
+        return;
+      }
+      selectedPlanningSession = payload;
+      renderSelectedPlanningSession(payload);
+    }
+
+    function renderSelectedPlanningSession(session) {
+      document.querySelector("#planning-session-heading").textContent =
+        session.adapter + " planning session · " + session.state;
+      planningTranscript.textContent = (session.events || []).map((event) => {
+        const label = event.type || "event";
+        return label + ": " + (event.text || JSON.stringify(event.vendor_event || event));
+      }).join("\n");
+      const proposals = document.querySelector("#planning-proposals");
+      proposals.replaceChildren();
+      const approvable = session.state !== "FAILED" && session.state !== "BOUNDARY_VIOLATION";
+      const validVersions = (session.proposals || []).filter((entry) => entry.valid).map((entry) => entry.version);
+      const newestValidVersion = validVersions.length ? Math.max.apply(null, validVersions) : null;
+      (session.proposals || []).forEach((entry) => {
+        const card = document.createElement("div");
+        card.className = "queue-card";
+        const isDefault = approvable && entry.valid && entry.version === newestValidVersion;
+        if (isDefault) card.classList.add("planning-default-proposal");
+        const status = document.createElement("strong");
+        status.textContent = "Proposal " + entry.version +
+          (entry.valid ? " · valid" : " · invalid") +
+          (isDefault ? " · newest valid (default)" : "");
+        card.append(status);
+        if (entry.valid && approvable) {
+          const useButton = document.createElement("button");
+          useButton.type = "button";
+          useButton.textContent = isDefault ? "Use newest valid proposal (default)" : "Use proposal as editable draft";
+          useButton.addEventListener("click", () => usePlanningProposal(session, entry));
+          card.append(useButton);
+        }
+        proposals.append(card);
+      });
+    }
+
+    function usePlanningProposal(session, entry) {
+      selectedPlanningProposal = {
+        session_id: session.session_id,
+        version: entry.version,
+        proposal: entry.proposal,
+      };
+      const issue = session.source && session.source.kind === "github_issue"
+        ? session.source.issue
+        : null;
+      if (!issue) {
+        error.textContent = "Anchor this free-form proposal to a GitHub issue before approval.";
+        error.classList.remove("hidden");
+        document.querySelector("#issue-input").focus();
+        return;
+      }
+      renderPreview({
+        source_issue: issue,
+        task_intent: entry.proposal.task_text,
+        task_text: entry.proposal.task_text,
+        target_scope: entry.proposal.target_scope.join("\n"),
+        acceptance_check: entry.proposal.acceptance_check,
+        adapter_options: retryAdapters,
+        draft_adapter: entry.proposal.suggested_adapter,
+      });
+      planningWorkflow.classList.add("hidden");
+      applyPlanningProposal(entry.proposal);
+    }
+
+    function applyPlanningProposal(proposal) {
+      document.querySelector("#task-intent").value = proposal.task_text;
+      document.querySelector("#task-text").value = proposal.task_text;
+      document.querySelector("#target-scope").value = proposal.target_scope.join("\n");
+      document.querySelector("#acceptance-check").value = proposal.acceptance_check;
+      document.querySelector("#adapter").value = proposal.suggested_adapter;
+    }
+
+    setInterval(async () => {
+      if (
+        selectedPlanningSession
+        && !planningWorkflow.classList.contains("hidden")
+        && selectedPlanningSession.state === "ACTIVE"
+      ) {
+        await selectPlanningSession(selectedPlanningSession.session_id);
+      }
+    }, 2500);
 
     async function renderHistoricalRuns() {
       const response = await fetch("/api/runs");

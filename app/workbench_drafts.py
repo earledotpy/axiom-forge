@@ -69,7 +69,7 @@ def fetch_issue_with_gh(reference: IssueReference) -> IssueContext:
         "view",
         str(reference.number),
         "--json",
-        "number,title,body,url",
+        "number,title,body,url,comments",
     ]
     if reference.repo:
         command.extend(["--repo", reference.repo])
@@ -86,6 +86,15 @@ def fetch_issue_with_gh(reference: IssueReference) -> IssueContext:
         body=issue.get("body") or "",
         url=issue["url"],
         repo=reference.repo,
+        comments=tuple(
+            {
+                "author": str((comment.get("author") or {}).get("login") or ""),
+                "body": str(comment.get("body") or ""),
+                "url": str(comment.get("url") or ""),
+            }
+            for comment in issue.get("comments", [])
+            if isinstance(comment, dict)
+        ),
     )
 
 

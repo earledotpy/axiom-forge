@@ -31,6 +31,7 @@ class IssueContext:
     body: str
     url: str
     repo: str | None = None
+    comments: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,8 @@ class ApprovedDelegation:
     acceptance_file: str
     adapter: str
     delegation_artifact_revision: str
+    planning_session_id: str | None = None
+    planning_proposal_sha256: str | None = None
 
 
 class WorkbenchApprovalError(ValueError):
@@ -110,6 +113,8 @@ class OperatorDecisionQueueItem:
     changed_paths: list[str]
     failure_reason: str | None
     evidence_error: str | None
+    planning_session_id: str | None = None
+    planning_proposal_version: int | None = None
 
 
 @dataclass(frozen=True)

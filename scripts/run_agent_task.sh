@@ -62,6 +62,8 @@ DELEGATION_TASK_FILE=""
 FORGE_HEAD_BEFORE=""
 FORGE_BRANCHES_BEFORE=""
 FORGE_STATUS_BEFORE=""
+LIVE_STATE_FILE="$ROOT/runs/.live-run.json"
+LIVE_STATE_ACTIVE=0
 
 mkdir -p "$RUN_DIR"
 cp "$TASK_FILE" "$RUN_DIR/task.md"
@@ -106,6 +108,50 @@ write_record() {
     return 1
   }
   printf '%s\n' "$record" > "$RUN_DIR/record.json"
+}
+
+write_live_state() {
+  local lifecycle_state="$1"
+  python - "$LIVE_STATE_FILE" "$RUN_ID" "$lifecycle_state" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+run_id = sys.argv[2]
+lifecycle_state = sys.argv[3]
+payload = {
+    "schema_version": 1,
+    "run_id": run_id,
+    "lifecycle_state": lifecycle_state,
+    "stdout_log": f"runs/{run_id}/stdout.log",
+    "stderr_log": f"runs/{run_id}/stderr.log",
+}
+temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(temporary, path)
+PY
+  LIVE_STATE_ACTIVE=1
+}
+
+clear_live_state() {
+  [[ "$LIVE_STATE_ACTIVE" -eq 1 ]] || return 0
+  python - "$LIVE_STATE_FILE" "$RUN_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+run_id = sys.argv[2]
+try:
+    state = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+if state.get("run_id") == run_id:
+    path.unlink()
+PY
+  LIVE_STATE_ACTIVE=0
 }
 
 
@@ -166,6 +212,7 @@ read_cli_provenance() {
 }
 
 cleanup() {
+  clear_live_state
   if [[ -d "$AGENT_WT" ]]; then
     git -C "$WORKTREE_REPO" worktree remove -f "$AGENT_WT" >/dev/null 2>&1 || true
   fi
@@ -176,6 +223,9 @@ fail_run() {
   local reason="$1"
   echo "RUN_FAILED: $RUN_ID" >&2
   echo "REASON: $reason" >&2
+  if [[ "$RUN_MODE" == "target" ]]; then
+    write_live_state "terminal" || true
+  fi
   write_record "FAILED" "$reason" || true
   exit 1
 }
@@ -279,6 +329,10 @@ BRANCHES_BEFORE="$(git -C "$WORKTREE_REPO" for-each-ref --format="%(refname)" re
 TARGET_STATUS_BEFORE="$(containment_snapshot "$WORKTREE_REPO")" \
   || fail_run "target_repo_status_snapshot_failed"
 
+if [[ "$RUN_MODE" == "target" ]]; then
+  write_live_state "active" || fail_run "live_run_state_write_failed"
+fi
+
 ADAPTER_EXIT=0
 PYTHONDONTWRITEBYTECODE=1 AXIOM_CLI_PROVENANCE_FILE="$CLI_PROVENANCE_FILE" AXIOM_ADAPTER_FAILURE_FILE="$ADAPTER_FAILURE_FILE" "$AGENT_ADAPTER" "$RUN_DIR/task.md" "$AGENT_WT" >>"$RUN_DIR/stdout.log" 2>>"$RUN_DIR/stderr.log" \
   || ADAPTER_EXIT=$?
@@ -359,6 +413,9 @@ PATCH_SHA="$(python "$SCRIPT_DIR/sha256_file.py" "$RUN_DIR/patch.diff")" \
   || fail_run "patch_sha256_compute_failed"
 
 write_record "COMPLETED" ""
+if [[ "$RUN_MODE" == "target" ]]; then
+  write_live_state "terminal" || true
+fi
 if [[ "$RUN_MODE" == "target" ]]; then
   python "$SCRIPT_DIR/run_history.py" mark-superseded \
     --runs-root "$ROOT/runs" \

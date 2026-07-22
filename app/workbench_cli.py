@@ -7,12 +7,17 @@ from pathlib import Path
 
 from app.workbench_drafts import default_repo_from_origin, fetch_issue_with_gh
 from app.workbench_http import make_handler
+from app.planning_drivers import planning_driver_registry
+from app.planning_sessions import PlanningSessionStore
 from app.workbench_runtime import WorkbenchServer
 
 def run_server(host: str, port: int, open_browser: bool) -> None:
+    forge_root = Path.cwd().resolve()
     workbench = WorkbenchServer(
         issue_fetcher=fetch_issue_with_gh,
-        default_repo=default_repo_from_origin(Path.cwd()),
+        default_repo=default_repo_from_origin(forge_root),
+        forge_root=forge_root,
+        planning_sessions=PlanningSessionStore(forge_root, planning_driver_registry()),
     )
     server = ThreadingHTTPServer((host, port), make_handler(workbench))
     url = f"http://{host}:{server.server_port}/"

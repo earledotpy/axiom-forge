@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from threading import Lock
 
@@ -17,6 +17,7 @@ from scripts.operator_evidence import summarize_run
 from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 
 from app.workbench_drafts import issue_to_draft_preview, parse_issue_reference
+from app.planning_sessions import PlanningSessionError, PlanningSessionStore
 from app.workbench_models import (
     DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorDecisionQueue,
@@ -33,6 +34,7 @@ class WorkbenchServer:
         forge_root: Path | None = None,
         target_runner: TargetRunner | None = None,
         verification_runner: VerificationRunner | None = None,
+        planning_sessions: PlanningSessionStore | None = None,
     ):
         self.issue_fetcher = issue_fetcher
         self.default_repo = default_repo
@@ -41,7 +43,45 @@ class WorkbenchServer:
         self._verification_runner = verification_runner or _run_target_mode_verifier
         self._active_delegation_lock = Lock()
         self._active_delegation: tuple[str, str] | None = None
+        self.planning_sessions = planning_sessions
 
+    def start_planning_session(self, payload: object) -> dict:
+        if not isinstance(payload, dict):
+            raise PlanningSessionError("invalid_planning_session_request")
+        request = dict(payload)
+        issue_seed = request.get("issue_seed")
+        if issue_seed is not None:
+            if not isinstance(issue_seed, str):
+                raise PlanningSessionError("invalid_planning_issue_seed")
+            try:
+                reference = parse_issue_reference(issue_seed, default_repo=self.default_repo)
+                issue = self.issue_fetcher(reference)
+            except (RuntimeError, ValueError) as error:
+                raise PlanningSessionError("planning_issue_seed_fetch_failed") from error
+            request["issue_seed"] = asdict(issue)
+        return self._planning_sessions().start(request)
+
+    def planning_session(self, session_id: str) -> dict:
+        return self._planning_sessions().session(session_id)
+
+    def planning_sessions_list(self) -> list[dict]:
+        return self._planning_sessions().list_sessions()
+
+    def send_planning_message(self, session_id: str, payload: object) -> dict:
+        if not isinstance(payload, dict) or set(payload) != {"message"}:
+            raise PlanningSessionError("invalid_planning_message")
+        return self._planning_sessions().send(session_id, payload["message"])
+
+    def close_planning_session(self, session_id: str) -> dict:
+        return self._planning_sessions().close(session_id)
+
+    def planning_proposal_for_approval(self, session_id: str, version: int) -> dict:
+        return self._planning_sessions().proposal_for_approval(session_id, version)
+
+    def _planning_sessions(self) -> PlanningSessionStore:
+        if self.planning_sessions is None:
+            raise PlanningSessionError("planning_sessions_unavailable")
+        return self.planning_sessions
     def preview_for_issue(self, raw_reference: str) -> DraftTaskPreview:
         reference = parse_issue_reference(raw_reference, default_repo=self.default_repo)
         issue = self.issue_fetcher(reference)
@@ -49,6 +89,16 @@ class WorkbenchServer:
 
     def approve_draft(self, payload: object) -> ApprovedDelegation:
         approval = _parse_approval(payload)
+        proposal_sha256 = None
+        if approval.planning_session_id is not None:
+            try:
+                proposal = self._planning_sessions().proposal_for_approval(
+                    approval.planning_session_id,
+                    approval.planning_proposal_version,
+                )
+            except PlanningSessionError as error:
+                raise WorkbenchApprovalError(str(error)) from error
+            proposal_sha256 = proposal["proposal_sha256"]
         task_file = self.forge_root / "tasks" / f"workbench-issue-{approval.issue_number}.task.md"
         scope_file = scope_sidecar_path(task_file)
         acceptance_file = acceptance_check_path(task_file)
@@ -59,7 +109,15 @@ class WorkbenchServer:
             raise WorkbenchApprovalError("delegation_artifact_already_exists")
 
         task_file.parent.mkdir(parents=True, exist_ok=True)
-        task_file.write_text(_approved_task_text(approval.task_text, approval.adapter), encoding="utf-8")
+        task_file.write_text(
+            _approved_task_text(
+                approval.task_text,
+                approval.adapter,
+                planning_session_id=approval.planning_session_id,
+                planning_proposal_sha256=proposal_sha256,
+            ),
+            encoding="utf-8",
+        )
         scope_file.write_text(approval.target_scope, encoding="utf-8")
         acceptance_file.write_text(approval.acceptance_check, encoding="utf-8")
 
@@ -87,6 +145,8 @@ class WorkbenchServer:
             acceptance_file=acceptance_file.relative_to(self.forge_root).as_posix(),
             adapter=approval.adapter,
             delegation_artifact_revision=revision,
+            planning_session_id=approval.planning_session_id,
+            planning_proposal_sha256=proposal_sha256,
         )
 
     def execute_confirmed_delegation(self, payload: object) -> CapturedRun:
@@ -98,6 +158,35 @@ class WorkbenchServer:
         retry = _parse_confirmed_retry(payload)
         task_file = _retry_execution_target(self.forge_root, retry.run_id)
         return self._run_confirmed_delegation(task_file, retry.adapter)
+
+    def live_run(self) -> dict:
+        state_path = self.forge_root / "runs" / ".live-run.json"
+        if not state_path.is_file():
+            with self._active_delegation_lock:
+                active = self._active_delegation is not None
+            if active:
+                return _live_run_unavailable("live_run_state_missing")
+            return {"authority": "live_run_stream", "state": "inactive"}
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            run_id, lifecycle_state = _live_run_identity(state)
+            if lifecycle_state == "terminal":
+                return {
+                    "authority": "live_run_stream",
+                    "state": "terminal",
+                    "run_id": run_id,
+                }
+            stdout_path = _live_run_log_path(self.forge_root, state, run_id, "stdout")
+            stderr_path = _live_run_log_path(self.forge_root, state, run_id, "stderr")
+            return {
+                "authority": "live_run_stream",
+                "state": "active",
+                "run_id": run_id,
+                "stdout": _bounded_live_tail(stdout_path),
+                "stderr": _bounded_live_tail(stderr_path),
+            }
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return _live_run_unavailable("live_run_state_invalid")
 
     def _run_confirmed_delegation(self, task_file: str, adapter: str) -> CapturedRun:
         command = [
@@ -157,6 +246,7 @@ class WorkbenchServer:
 
     def operator_decision_queue(self) -> OperatorDecisionQueue:
         history = self.historical_captured_runs()
+        planning_proposals = self._planning_proposal_queue_items()
         with self._active_delegation_lock:
             active_delegation = self._active_delegation
 
@@ -203,6 +293,11 @@ class WorkbenchServer:
         return OperatorDecisionQueue(
             authority="operator_decision_queue",
             stages=[
+                OperatorDecisionQueueStage(
+                    "planning_proposals",
+                    "Planning proposals awaiting approval",
+                    planning_proposals,
+                ),
                 OperatorDecisionQueueStage("awaiting_execution", "Awaiting execution", awaiting_execution),
                 OperatorDecisionQueueStage("executing", "Executing", executing),
                 OperatorDecisionQueueStage("awaiting_verification", "Awaiting verification", awaiting_verification),
@@ -215,6 +310,40 @@ class WorkbenchServer:
                 OperatorDecisionQueueStage("evidence_problems", "Evidence problems", evidence_problems),
             ],
         )
+
+    def _planning_proposal_queue_items(self) -> list[OperatorDecisionQueueItem]:
+        if self.planning_sessions is None:
+            return []
+        items = []
+        for session in self.planning_sessions.list_sessions():
+            if session["state"] in {"FAILED", "BOUNDARY_VIOLATION"}:
+                continue
+            valid = [proposal for proposal in session["proposals"] if proposal.get("valid") is True]
+            if not valid:
+                continue
+            proposal = valid[-1]
+            items.append(OperatorDecisionQueueItem(
+                stage="planning_proposals",
+                decision_label="Review planning proposal",
+                evidence_line=(
+                    f"{session['adapter']} · session {session['session_id'][:8]} · "
+                    f"proposal {proposal['version']} · draft-only"
+                ),
+                action_label="Review proposal →",
+                action="review_planning_proposal",
+                run_id=None,
+                task_file=None,
+                adapter=proposal["proposal"]["suggested_adapter"],
+                run_status=None,
+                verification_result=None,
+                acceptance_result=None,
+                changed_paths=proposal["proposal"]["target_scope"],
+                failure_reason=None,
+                evidence_error=None,
+                planning_session_id=session["session_id"],
+                planning_proposal_version=proposal["version"],
+            ))
+        return items
 
     def evidence_details_for_captured_run(self, run_id: str) -> OperatorEvidenceDetails:
         run_dir = _captured_run_directory(self.forge_root, run_id)
@@ -232,6 +361,8 @@ class DraftApproval:
     target_scope: str
     acceptance_check: str
     adapter: str
+    planning_session_id: str | None
+    planning_proposal_version: int
 
 
 def _parse_approval(payload: object) -> DraftApproval:
@@ -248,12 +379,27 @@ def _parse_approval(payload: object) -> DraftApproval:
     if any(not isinstance(payload.get(field), str) for field in fields):
         raise WorkbenchApprovalError("invalid_approval_request")
 
+    planning_session_id = payload.get("planning_session_id")
+    planning_proposal_version = payload.get("planning_proposal_version")
+    if planning_session_id is None and planning_proposal_version is None:
+        planning_proposal_version = 0
+    elif (
+        not isinstance(planning_session_id, str)
+        or not re.fullmatch(r"[a-f0-9]{32}", planning_session_id)
+        or not isinstance(planning_proposal_version, int)
+        or isinstance(planning_proposal_version, bool)
+        or planning_proposal_version < 1
+    ):
+        raise WorkbenchApprovalError("invalid_planning_proposal_reference")
+
     return DraftApproval(
         issue_number=issue_number,
         task_text=payload["task_text"],
         target_scope=payload["target_scope"],
         acceptance_check=payload["acceptance_check"],
         adapter=payload["adapter"],
+        planning_session_id=planning_session_id,
+        planning_proposal_version=planning_proposal_version,
     )
 
 
@@ -385,6 +531,47 @@ def _parse_verification_request(payload: object) -> str:
 
 def _is_captured_run_id(run_id: str) -> bool:
     return re.fullmatch(r"[0-9]{8}-[0-9]{6}-[0-9]+", run_id) is not None
+
+
+def _live_run_unavailable(reason: str) -> dict:
+    return {"authority": "live_run_stream", "state": "unavailable", "reason": reason}
+
+
+def _live_run_identity(state: object) -> tuple[str, str]:
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError("invalid_live_run_state")
+    run_id = state.get("run_id")
+    lifecycle_state = state.get("lifecycle_state")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise ValueError("invalid_live_run_state")
+    if lifecycle_state not in {"active", "terminal"}:
+        raise ValueError("invalid_live_run_state")
+    return run_id, lifecycle_state
+
+
+def _live_run_log_path(root: Path, state: dict, run_id: str, stream: str) -> Path:
+    path_value = state.get(f"{stream}_log")
+    expected = f"runs/{run_id}/{stream}.log"
+    if path_value != expected:
+        raise ValueError("invalid_live_run_log_path")
+    path = root / path_value
+    try:
+        path.resolve().relative_to((root / "runs").resolve())
+    except ValueError as error:
+        raise ValueError("invalid_live_run_log_path") from error
+    if not path.is_file():
+        raise ValueError("live_run_log_unavailable")
+    return path
+
+
+def _bounded_live_tail(path: Path) -> dict:
+    byte_limit = 64 * 1024
+    with path.open("rb") as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - byte_limit))
+        tail = stream.read(byte_limit)
+    return {"text": tail.decode("utf-8", errors="replace"), "truncated": size > byte_limit}
 
 
 def _captured_run_directory(root: Path, run_id: str) -> Path:
@@ -732,8 +919,20 @@ def _validate_target_scope(scope: str) -> frozenset[str]:
     return frozenset(approved_paths)
 
 
-def _approved_task_text(task_text: str, adapter: str) -> str:
-    return f"<!-- axiom-forge-workbench-approved-adapter: {adapter} -->\n{task_text.rstrip()}\n"
+def _approved_task_text(
+    task_text: str,
+    adapter: str,
+    *,
+    planning_session_id: str | None = None,
+    planning_proposal_sha256: str | None = None,
+) -> str:
+    metadata = [f"<!-- axiom-forge-workbench-approved-adapter: {adapter} -->"]
+    if planning_session_id is not None and planning_proposal_sha256 is not None:
+        metadata.extend([
+            f"<!-- axiom-forge-planning-session: {planning_session_id} -->",
+            f"<!-- axiom-forge-planning-proposal-sha256: {planning_proposal_sha256} -->",
+        ])
+    return "\n".join([*metadata, task_text.rstrip(), ""])
 
 
 def _require_clean_forge_repo(root: Path) -> None:
