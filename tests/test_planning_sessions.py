@@ -3,6 +3,9 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
+
+import app.planning_sessions as planning_sessions
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
@@ -114,6 +117,17 @@ class TwoTurnDriver(FakeDriver):
         return {"resume_identity": resume_identity, "events": self._send_events}
 
 
+def _make_target(root):
+    target = root / "target"
+    subprocess.run(["git", "init", "-q", str(target)], check=True)
+    subprocess.run(["git", "-C", str(target), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(target), "config", "user.name", "Axiom Test"], check=True)
+    target.joinpath("README.md").write_text("target\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(target), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(target), "commit", "-q", "-m", "target"], check=True)
+    return target
+
+
 def _queued_runner(responses):
     queue = list(responses)
 
@@ -125,14 +139,7 @@ def _queued_runner(responses):
 
 class TestPlanningSessions(unittest.TestCase):
     def make_target(self, root):
-        target = root / "target"
-        subprocess.run(["git", "init", "-q", str(target)], check=True)
-        subprocess.run(["git", "-C", str(target), "config", "user.email", "test@example.invalid"], check=True)
-        subprocess.run(["git", "-C", str(target), "config", "user.name", "Axiom Test"], check=True)
-        target.joinpath("README.md").write_text("target\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(target), "add", "README.md"], check=True)
-        subprocess.run(["git", "-C", str(target), "commit", "-q", "-m", "target"], check=True)
-        return target
+        return _make_target(root)
 
     def test_start_records_append_only_evidence_and_valid_proposal_without_authority(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -486,7 +493,11 @@ class TestPlanningSessions(unittest.TestCase):
                     break
                 time.sleep(0.01)
             else:
-                self.fail(f"incremental planning turn did not become idle: {store.session(started['session_id'])['state']}")
+                final = store.session(started["session_id"])
+                self.fail(
+                    "incremental planning turn did not become idle: "
+                    f"state={final['state']} reason={final.get('terminal_reason')}"
+                )
             self.assertEqual(store.proposal_for_approval(started["session_id"], 1)["task_text"], "Bounded incremental task.")
 
     def test_incremental_driver_send_returns_active_while_events_are_still_arriving(self):
@@ -505,7 +516,11 @@ class TestPlanningSessions(unittest.TestCase):
                     break
                 time.sleep(0.01)
             else:
-                self.fail("initial planning turn did not become idle")
+                final = store.session(started["session_id"])
+                self.fail(
+                    "initial planning turn did not become idle: "
+                    f"state={final['state']} reason={final.get('terminal_reason')}"
+                )
 
             sent_at = time.monotonic()
             sent = store.send(started["session_id"], "Refine it.")
@@ -529,7 +544,11 @@ class TestPlanningSessions(unittest.TestCase):
                 time.sleep(0.01)
 
             else:
-                self.fail("resumed planning turn did not become idle")
+                final = store.session(started["session_id"])
+                self.fail(
+                    "resumed planning turn did not become idle: "
+                    f"state={final['state']} reason={final.get('terminal_reason')}"
+                )
 
     def test_closing_an_active_incremental_turn_waits_for_driver_shutdown_before_teardown(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -606,7 +625,10 @@ class TestPlanningSessions(unittest.TestCase):
                         break
                     time.sleep(0.01)
                 else:
-                    self.fail("HTTP planning start did not become idle")
+                    self.fail(
+                        "HTTP planning start did not become idle: "
+                        f"state={current['state']} reason={current.get('terminal_reason')}"
+                    )
 
                 send_request = Request(
                     f"{base_url}/{started['session_id']}/messages",
@@ -638,7 +660,10 @@ class TestPlanningSessions(unittest.TestCase):
                         break
                     time.sleep(0.01)
                 else:
-                    self.fail("HTTP planning send did not become idle")
+                    self.fail(
+                        "HTTP planning send did not become idle: "
+                        f"state={current['state']} reason={current.get('terminal_reason')}"
+                    )
 
             finally:
                 driver.start_release.set()
@@ -832,3 +857,62 @@ class TestPlanningSessions(unittest.TestCase):
             self.assertEqual(store.proposal_for_approval(session["session_id"], 2)["task_text"], "Refined bounded task.")
             queue = {stage.name: stage.items for stage in workbench.operator_decision_queue().stages}
             self.assertEqual(queue["planning_proposals"][0].planning_proposal_version, 2)
+
+
+class TestPlanningSessionFileIoRetry(unittest.TestCase):
+    """Regression guard for the `_retry_file_io` retry semantics (Issue #107);
+    see that helper for why planning-session file I/O must absorb transient
+    Windows sharing violations."""
+
+    def setUp(self):
+        self._original_backoff = planning_sessions._FILE_IO_RETRY_BACKOFF
+        planning_sessions._FILE_IO_RETRY_BACKOFF = 0
+
+    def tearDown(self):
+        planning_sessions._FILE_IO_RETRY_BACKOFF = self._original_backoff
+
+    def test_retry_recovers_from_transient_sharing_violations(self):
+        calls = {"count": 0}
+
+        def flaky():
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise PermissionError("sharing violation")
+            return "recovered"
+
+        self.assertEqual(planning_sessions._retry_file_io(flaky), "recovered")
+        self.assertEqual(calls["count"], 3)
+
+    def test_retry_reraises_when_the_file_stays_locked(self):
+        def always_denied():
+            raise PermissionError("locked")
+
+        with self.assertRaises(PermissionError):
+            planning_sessions._retry_file_io(always_denied)
+
+    def test_write_metadata_survives_a_transient_replace_denial(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            forge = root / "forge"
+            forge.mkdir()
+            target = _make_target(root)
+            store = PlanningSessionStore(forge, {"fake-a": FakeDriver([{"sequence": 1, "type": "idle"}])})
+            session = store.start({"adapter": "fake-a", "target_repo": str(target), "prompt": "Plan it."})
+            session_dir = forge / "sessions" / session["session_id"]
+            _, metadata = store._load(session["session_id"])
+            metadata["state"] = "ACTIVE"
+
+            real_replace = planning_sessions.os.replace
+            state = {"count": 0}
+
+            def flaky_replace(src, dst):
+                state["count"] += 1
+                if state["count"] == 1:
+                    raise PermissionError("ERROR_SHARING_VIOLATION")
+                return real_replace(src, dst)
+
+            with mock.patch.object(planning_sessions.os, "replace", flaky_replace):
+                store._write_metadata(session_dir, metadata)
+
+            self.assertGreaterEqual(state["count"], 2)
+            self.assertEqual(store._load(session["session_id"])[1]["state"], "ACTIVE")

@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock, Thread, current_thread
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from app.planning_drivers import REQUIRED_PLANNING_CAPABILITIES
 
@@ -19,10 +19,39 @@ class PlanningSessionError(ValueError):
     pass
 
 
+_FileIoResult = TypeVar("_FileIoResult")
+
+
+def _retry_file_io(operation: Callable[[], _FileIoResult]) -> _FileIoResult:
+    """Run a file operation, retrying transient Windows sharing violations.
+
+    ``operation`` is retried while it raises ``PermissionError`` (the error
+    Windows raises when a file is briefly locked by a concurrent open or atomic
+    replace in the same process). The final attempt's exception propagates so a
+    genuinely inaccessible file still fails.
+    """
+    for attempt in range(_FILE_IO_RETRY_ATTEMPTS):
+        try:
+            return operation()
+        except PermissionError:
+            if attempt == _FILE_IO_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(_FILE_IO_RETRY_BACKOFF)
+
+
 _TERMINAL_STATES = {"CLOSED", "FAILED", "BOUNDARY_VIOLATION"}
 _SESSION_STATES = {"ACTIVE", "IDLE", *_TERMINAL_STATES}
 _REQUIRED_DRIVER_METHODS = ("identity", "start", "send", "events", "resume", "close")
 _STORE_ENFORCED_CAPABILITIES = {"host_enforced_confinement"}
+# Windows serves file opens and atomic replaces with mandatory sharing rules: a
+# reader that momentarily holds session.json/transcript.jsonl open collides with
+# a concurrent os.replace or append open in the same process and surfaces as a
+# transient PermissionError (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED). The
+# planning-session poller and its background turn read and write these files on
+# every 10ms tick, so under nested-verifier load the collision is frequent enough
+# to fail a turn terminal. Retry briefly before giving up.
+_FILE_IO_RETRY_ATTEMPTS = 20
+_FILE_IO_RETRY_BACKOFF = 0.02
 _FIXED_POLICY = {
     "name": "investigation-only-v1",
     "allow": ["read_target_repository", "read_forge_evidence", "non_mutating_investigation"],
@@ -211,7 +240,7 @@ class PlanningSessionStore:
         events = []
         transcript = session_dir / "transcript.jsonl"
         if transcript.is_file():
-            for line in transcript.read_text(encoding="utf-8").splitlines():
+            for line in _retry_file_io(lambda: transcript.read_text(encoding="utf-8")).splitlines():
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
@@ -405,17 +434,11 @@ class PlanningSessionStore:
         if not isinstance(session_id, str) or not session_id or "/" in session_id or "\\" in session_id:
             raise PlanningSessionError("invalid_planning_session_reference")
         session_dir = self.sessions_root / session_id
-        for attempt in range(5):
-            try:
-                metadata = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-            except PermissionError as error:
-                if attempt == 4:
-                    raise PlanningSessionError("planning_session_not_found") from error
-                time.sleep(0.01)
-            except (OSError, json.JSONDecodeError) as error:
-                raise PlanningSessionError("planning_session_not_found") from error
-            else:
-                break
+        try:
+            raw = _retry_file_io(lambda: (session_dir / "session.json").read_text(encoding="utf-8"))
+            metadata = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as error:
+            raise PlanningSessionError("planning_session_not_found") from error
         if not isinstance(metadata, dict) or metadata.get("session_id") != session_id or metadata.get("state") not in _SESSION_STATES:
             raise PlanningSessionError("planning_session_not_found")
         return session_dir, metadata
@@ -430,13 +453,18 @@ class PlanningSessionStore:
         return _redacted_value(text, self.secret_values)
 
     def _append(self, session_dir: Path, event: dict[str, Any]) -> None:
-        with (session_dir / "transcript.jsonl").open("a", encoding="utf-8") as transcript:
-            transcript.write(json.dumps(event, sort_keys=True) + "\n")
+        line = json.dumps(event, sort_keys=True) + "\n"
+
+        def write() -> None:
+            with (session_dir / "transcript.jsonl").open("a", encoding="utf-8") as transcript:
+                transcript.write(line)
+
+        _retry_file_io(write)
 
     def _write_metadata(self, session_dir: Path, metadata: dict[str, Any]) -> None:
         temporary = session_dir / f".session-{uuid.uuid4().hex}.tmp"
         temporary.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-        os.replace(temporary, session_dir / "session.json")
+        _retry_file_io(lambda: os.replace(temporary, session_dir / "session.json"))
 
     def _validate_drivers(self) -> None:
         for driver in self.drivers.values():
