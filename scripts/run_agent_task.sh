@@ -250,8 +250,12 @@ containment_snapshot() {
   status_lines="$(git -C "$repo_dir" status --porcelain=v1 --untracked-files=all)" || return 1
   ignored_lines="$(git -C "$repo_dir" ls-files --others --ignored --exclude-standard)" || return 1
   printf '%s\n--ignored--\n' "$status_lines"
+  # Exclude runner-owned, gitignored transient state that the runner itself
+  # writes during a run: the run's own evidence directory and the live-run
+  # marker. Neither is an adapter mutation of the forge checkout, so the
+  # containment guard must not attribute them to the adapter.
   # grep -v exits 1 when every line is filtered out; that is not an error here.
-  printf '%s\n' "$ignored_lines" | grep -v "^runs/$RUN_ID/" || true
+  printf '%s\n' "$ignored_lines" | grep -vE "^runs/$RUN_ID/|^runs/\.live-run\.json$" || true
 }
 
 if [[ "$TARGET_MODE" -eq 1 ]]; then
