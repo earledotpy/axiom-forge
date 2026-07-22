@@ -260,7 +260,7 @@ def _planning_prompt(seed: object, prompt: str) -> str:
     return "\n".join([
         "You are in an Axiom Forge planning session. Investigate only.",
         "Do not edit files, change Git state, request permissions, expose secrets, delegate execution, or approve work.",
-        "When you have a bounded proposal, emit one JSON object with exactly task_text, target_scope, acceptance_check, and suggested_adapter.",
+        "When you have a bounded proposal, emit one JSON object with exactly task_text, target_scope, acceptance_check, and suggested_adapter. target_scope must be a JSON array of repo-relative path strings, even for one path; for example, \"target_scope\": [\"path/to/file\"].",
         f"Planning source: {json.dumps(seed, sort_keys=True)}",
         f"Operator: {prompt}",
     ])

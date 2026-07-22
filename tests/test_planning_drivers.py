@@ -176,6 +176,9 @@ class TestPlanningDrivers(unittest.TestCase):
         self.assertIn("read-only", command)
         self.assertIn("--json", command)
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
+        prompt = command[-1]
+        self.assertIn("target_scope must be a JSON array of repo-relative path strings", prompt)
+        self.assertIn('"target_scope": ["path/to/file"]', prompt)
         self.assertEqual(result["resume_identity"], "codex-thread")
         driver.resume(
             resume_identity=result["resume_identity"],
