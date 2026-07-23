@@ -1,0 +1,2 @@
+window.confirm
+window.prompt
