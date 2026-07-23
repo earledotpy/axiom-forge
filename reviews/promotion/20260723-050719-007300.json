@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "review_type": "promotion",
+  "run_id": "20260723-050719-007300",
+  "patch_sha256": "889e8d8011905dc22676273e2b1cc404251979b74b4d1b502ad7bad12c442cef",
+  "reviewer": "Claude (workbench walk, operating for Jeremy <jeremyaearle@gmail.com>)",
+  "decision": "APPROVED",
+  "concerns": "NO_CONCERNS",
+  "follow_up_tasks": [],
+  "evidence_attestation": true
+}
