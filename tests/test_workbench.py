@@ -1460,6 +1460,31 @@ class TestWorkbench(unittest.TestCase):
         ):
             self.assertIn(field, WORKBENCH_HTML)
 
+    def test_workbench_html_renders_target_and_verification_as_promotion_review_facts(self):
+        from app.workbench import WORKBENCH_HTML
+
+        for field in (
+            'Target name',
+            'Target repository',
+            'Target base branch',
+            'Target base commit',
+            'Delegation base commit',
+            'Target base stale',
+            'Verification evidence kind',
+            'Verification evidence path',
+            'Verification result',
+            'Verification reason',
+            'Acceptance result',
+        ):
+            self.assertIn(field, WORKBENCH_HTML)
+        self.assertIn('preparation.target.repo || "missing"', WORKBENCH_HTML)
+        self.assertIn('preparation.target.base_branch || "missing"', WORKBENCH_HTML)
+        self.assertIn('preparation.target.delegation_target_base_sha || "missing"', WORKBENCH_HTML)
+        self.assertIn('preparation.verification.kind || "missing"', WORKBENCH_HTML)
+        self.assertIn('preparation.verification.path || "missing"', WORKBENCH_HTML)
+        self.assertIn('preparation.verification.status || "missing"', WORKBENCH_HTML)
+        self.assertIn('...(preparation.verification.reason ?', WORKBENCH_HTML)
+
     def test_promotion_review_submission_commits_an_immutable_exact_run_review(self):
         run_id = '20260722-010203-000111'
         patch_sha256 = 'c' * 64
