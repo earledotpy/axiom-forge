@@ -406,6 +406,12 @@ if [[ "$RUN_MODE" == "target" ]]; then
   fi
 fi
 
+# Keep untracked agent-created files visible to patch capture without staging
+# their contents or creating a commit.  Intent-to-add lets git diff emit new
+# file patches, which later target-scope enforcement can inspect.
+git -C "$AGENT_WT" add -A -N \
+  || fail_run "patch_capture_prepare_failed"
+
 git -C "$AGENT_WT" diff --binary > "$RUN_DIR/patch.diff" \
   || fail_run "patch_capture_failed"
 

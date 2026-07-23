@@ -500,6 +500,26 @@ else
   find "$TARGET_REPO" -maxdepth 2 -type d -name runs -print >&2 || true
 fi
 
+expect_runner_pass \
+  "R8o_target_mode_new_file_only_adapter_produces_valid_run" \
+  bash scripts/run_agent_task.sh --target new-file-only-agent tasks/workbench-issue-115.task.md
+
+RUN_ID="$(cat /tmp/axiom-runner-last-good-run)"
+if grep -q '^diff --git a/docs/workbench-dogfood.md b/docs/workbench-dogfood.md$' "runs/$RUN_ID/patch.diff"; then
+  pass "R8p_new_file_only_patch_captures_untracked_path"
+else
+  fail "R8p_new_file_only_patch_captures_untracked_path"
+  cat "runs/$RUN_ID/patch.diff" >&2
+fi
+
+if bash scripts/verify_patch.sh --target "runs/$RUN_ID" >/tmp/axiom-runner-verify-new-file.out 2>/tmp/axiom-runner-verify-new-file.err; then
+  pass "R8q_new_file_only_patch_passes_target_scope_and_acceptance"
+else
+  fail "R8q_new_file_only_patch_passes_target_scope_and_acceptance"
+  cat /tmp/axiom-runner-verify-new-file.out
+  cat /tmp/axiom-runner-verify-new-file.err >&2
+fi
+
 rm -rf "$TARGET_TMP"
 restore_gate_config
 RUN_ID="$GOOD_RUN_ID"
