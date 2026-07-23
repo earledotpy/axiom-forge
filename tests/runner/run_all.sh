@@ -157,7 +157,15 @@ make_target_repo() {
   git -C "$repo" remote add origin "$remote"
   mkdir -p "$repo/app"
   printf 'def answer():\n    return "before"\n' > "$repo/app/target.py"
-  git -C "$repo" add app/target.py
+  cat > "$repo/test_target.py" <<'PY'
+import unittest
+
+
+class TargetFixtureTest(unittest.TestCase):
+    def test_fixture_is_valid(self):
+        self.assertTrue(True)
+PY
+  git -C "$repo" add app/target.py test_target.py
   git -C "$repo" commit -q -m "initial target"
 }
 
