@@ -15,6 +15,7 @@ echo "$RUN_ID"
 printf "> "
 
 IFS= read -r TYPED_RUN_ID || die "operator_input_failed"
+TYPED_RUN_ID="${TYPED_RUN_ID%$'\r'}"
 
 if [[ "$TYPED_RUN_ID" != "$RUN_ID" ]]; then
   die "operator_confirmation_mismatch"
