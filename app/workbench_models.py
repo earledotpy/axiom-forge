@@ -212,6 +212,14 @@ class ConfirmedRetry:
     adapter: str
 
 
+@dataclass(frozen=True)
+class AbandonedCapturedRun:
+    authority: str
+    run_id: str
+    reason: str
+    abandonment_revision: str
+
+
 VerificationRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]
 IssueFetcher = Callable[[IssueReference], IssueContext]
 TargetRunner = Callable[[list[str], Path], subprocess.CompletedProcess[str]]

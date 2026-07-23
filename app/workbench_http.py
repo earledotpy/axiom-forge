@@ -62,6 +62,9 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
             if parsed.path == "/api/retry":
                 self._handle_retry()
                 return
+            if parsed.path == "/api/abandon":
+                self._handle_abandon()
+                return
             if parsed.path == "/api/promotion-reviews":
                 self._handle_promotion_review_submit()
                 return
@@ -179,6 +182,13 @@ def make_handler(workbench: WorkbenchServer) -> type[BaseHTTPRequestHandler]:
                 return
 
             self._write_json(asdict(captured_run), HTTPStatus.CREATED)
+
+        def _handle_abandon(self) -> None:
+            try:
+                payload = self._read_bounded_json("invalid_abandon_request")
+                self._write_json(asdict(workbench.abandon_captured_run(payload)), HTTPStatus.CREATED)
+            except (UnicodeDecodeError, ValueError, WorkbenchExecutionError) as error:
+                self._write_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
         def _handle_decision_queue(self) -> None:
             self._write_json(asdict(workbench.operator_decision_queue()))

@@ -16,6 +16,7 @@ from app.workbench import (
     IssueReference,
     WorkbenchApprovalError,
     WorkbenchExecutionError,
+    WorkbenchPromotionError,
     WorkbenchPromotionReviewError,
     WorkbenchVerificationError,
     WorkbenchServer,
@@ -80,6 +81,15 @@ class TestWorkbench(unittest.TestCase):
             'run_id': '20260712-010203-123456',
             'adapter': 'claude-code',
             'confirmed': True,
+        }
+        payload.update(overrides)
+        return payload
+
+    def abandon_payload(self, **overrides):
+        payload = {
+            'run_id': '20260712-010203-123456',
+            'confirmation': '20260712-010203-123456',
+            'reason': 'No longer planned for retry.',
         }
         payload.update(overrides)
         return payload
@@ -643,6 +653,63 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(payload['run_id'], retry_id)
         self.assertEqual(calls[0][-2:], ['claude-code', 'tasks/workbench-issue-49.task.md'])
 
+    def test_abandonment_is_committed_and_prevents_retry_or_promotion(self):
+        run_id = '20260712-010203-123456'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, run_id, {
+            'run_id': run_id, 'run_status': 'FAILED', 'failure_reason': 'adapter_unavailable',
+            'agent': 'codex', 'run_mode': 'target',
+        })
+        (root / '.git' / 'info' / 'exclude').write_text('runs/\n', encoding='utf-8')
+
+        abandoned = workbench.abandon_captured_run(self.abandon_payload())
+
+        record = json.loads((root / 'reviews' / 'abandon' / f'{run_id}.json').read_text(encoding='utf-8'))
+        self.assertEqual(abandoned.reason, 'No longer planned for retry.')
+        self.assertTrue(abandoned.abandonment_revision)
+        self.assertEqual(record, {
+            'schema_version': 1,
+            'decision_type': 'abandon',
+            'run_id': run_id,
+            'reason': 'No longer planned for retry.',
+        })
+        self.assertEqual(workbench.historical_captured_runs()[0].state, 'abandoned')
+        self.assertEqual(
+            [item.run_id for stage in workbench.operator_decision_queue().stages for item in stage.items],
+            [],
+        )
+        with self.assertRaises(WorkbenchExecutionError) as retry_error:
+            workbench.retry_confirmed_delegation(self.retry_payload(run_id=run_id))
+        self.assertEqual(str(retry_error.exception), 'captured_run_abandoned')
+        with self.assertRaisesRegex(WorkbenchPromotionError, 'captured_run_abandoned'):
+            workbench.confirm_promotion({'run_id': run_id, 'confirmation': run_id})
+
+    def test_http_abandon_requires_confirmation(self):
+        run_id = '20260712-010203-123456'
+        workbench, root = self.make_workbench()
+        self.write_target_run_evidence(root, run_id, {
+            'run_id': run_id, 'run_status': 'FAILED', 'failure_reason': 'adapter_unavailable',
+            'agent': 'codex', 'run_mode': 'target',
+        })
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f'http://127.0.0.1:{server.server_port}/api/abandon',
+                data=json.dumps(self.abandon_payload(confirmation='wrong')).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}, method='POST',
+            )
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(request)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(json.loads(caught.exception.read().decode('utf-8')), {'error': 'exact_abandon_confirmation_required'})
+        caught.exception.close()
+
     def test_http_execution_endpoint_returns_captured_run_identity_and_status(self):
         run_id = "20260712-010203-123456"
 
@@ -822,6 +889,15 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('operator_confirmation_mismatch', WORKBENCH_HTML)
         self.assertNotIn('window.confirm', WORKBENCH_HTML)
         self.assertNotIn('window.prompt', WORKBENCH_HTML)
+
+    def test_workbench_html_offers_confirmed_abandonment_alongside_retry(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Abandon Run', WORKBENCH_HTML)
+        self.assertIn('fetch("/api/abandon"', WORKBENCH_HTML)
+        self.assertIn('Type the exact run ID to abandon', WORKBENCH_HTML)
+        self.assertIn('Why abandon this run?', WORKBENCH_HTML)
+        self.assertIn('confirmation, reason: abandonReason.value', WORKBENCH_HTML)
 
     def test_http_summary_keeps_raw_evidence_in_the_drill_down_endpoint(self):
         run_id = '20260712-010203-123456'

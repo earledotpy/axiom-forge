@@ -20,7 +20,7 @@ from scripts.target_task_scope import TargetTaskScopeError, validate_scope_path
 from app.workbench_drafts import issue_to_draft_preview, parse_issue_reference
 from app.planning_sessions import PlanningSessionError, PlanningSessionStore
 from app.workbench_models import (
-    DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
+    DEFAULT_ADAPTERS, AbandonedCapturedRun, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueFetcher, OperatorDecisionQueue,
     OperatorDecisionQueueItem, OperatorDecisionQueueStage, OperatorEvidenceDetails,
     OperatorEvidenceSummary, PromotionResult, PromotionReviewPreparation, PromotionReviewSubmission,
@@ -164,6 +164,35 @@ class WorkbenchServer:
         task_file = _retry_execution_target(self.forge_root, retry.run_id)
         return self._run_confirmed_delegation(task_file, retry.adapter)
 
+    def abandon_captured_run(self, payload: object) -> AbandonedCapturedRun:
+        run_id = _parse_abandon_request(payload)
+        run_dir = _captured_run_directory(self.forge_root, run_id)
+        evidence = _run_evidence(self.forge_root, run_dir)
+        if evidence["state"] == "abandoned":
+            raise WorkbenchExecutionError("captured_run_already_abandoned")
+        summary = _summary_from_evidence(evidence, run_dir)
+        if summary.run_status != "FAILED" and summary.verification_result != "FAIL":
+            raise WorkbenchExecutionError("captured_run_not_abandonable")
+
+        path = self.forge_root / "reviews" / "abandon" / f"{run_id}.json"
+        _require_clean_abandonment_repo(self.forge_root)
+        if path.exists() or run_git(self.forge_root, "cat-file", "-e", f"HEAD:{path.relative_to(self.forge_root).as_posix()}").returncode == 0:
+            raise WorkbenchExecutionError("captured_run_already_abandoned")
+        reason = _parse_abandon_reason(payload)
+        record = {"schema_version": 1, "decision_type": "abandon", "run_id": run_id, "reason": reason}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        repo_path = path.relative_to(self.forge_root).as_posix()
+        try:
+            _run_git_abandonment(self.forge_root, ["add", "--", repo_path], "abandonment_stage_failed")
+            _run_git_abandonment(self.forge_root, ["commit", "-m", f"Record abandonment for {run_id}"], "abandonment_commit_failed")
+        except Exception:
+            run_git(self.forge_root, "restore", "--staged", "--", repo_path)
+            path.unlink(missing_ok=True)
+            raise
+        revision = _git_output_abandonment(self.forge_root, ["rev-parse", "HEAD"], "abandonment_revision_unresolved")
+        return AbandonedCapturedRun("abandoned_captured_run", run_id, reason, revision)
+
     def prepare_promotion_review(self, payload: object) -> PromotionReviewPreparation:
         run_id = _parse_promotion_run_request(payload, "invalid_promotion_review_request")
         run_dir = _captured_run_directory(self.forge_root, run_id)
@@ -225,6 +254,8 @@ class WorkbenchServer:
                 if self._active_delegation is not None:
                     raise WorkbenchPromotionError("active_workbench_delegation_in_progress")
             run_dir = _captured_run_directory(self.forge_root, run_id)
+            if _run_evidence(self.forge_root, run_dir)["state"] == "abandoned":
+                raise WorkbenchPromotionError("captured_run_abandoned")
             record = _evidence_json(run_dir / "record.json")
             command = ["bash", str(self.forge_root / "scripts" / "promote.sh")]
             if record.get("run_mode") == "target":
@@ -338,7 +369,7 @@ class WorkbenchServer:
         represented_task_files = {
             task_file
             for run in history
-            if run.state != "superseded"
+            if run.state not in {"superseded", "abandoned"}
             for task_file in [_delegation_task_file(self.forge_root, run.run_id)]
             if task_file is not None
         }
@@ -359,7 +390,7 @@ class WorkbenchServer:
         evidence_problems: list[OperatorDecisionQueueItem] = []
 
         for run in history:
-            if run.state == "superseded":
+            if run.state in {"superseded", "abandoned"}:
                 continue
             if run.summary is None:
                 evidence_problems.append(_evidence_problem_queue_item(run))
@@ -520,6 +551,24 @@ def _parse_confirmed_retry(payload: object) -> ConfirmedRetry:
     return ConfirmedRetry(run_id=run_id, adapter=adapter)
 
 
+def _parse_abandon_request(payload: object) -> str:
+    if not isinstance(payload, dict) or set(payload) != {"run_id", "confirmation", "reason"}:
+        raise WorkbenchExecutionError("invalid_abandon_request")
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _is_captured_run_id(run_id):
+        raise WorkbenchExecutionError("invalid_captured_run_reference")
+    if payload.get("confirmation") != run_id:
+        raise WorkbenchExecutionError("exact_abandon_confirmation_required")
+    return run_id
+
+
+def _parse_abandon_reason(payload: object) -> str:
+    reason = payload.get("reason") if isinstance(payload, dict) else None
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+        raise WorkbenchExecutionError("invalid_abandon_reason")
+    return reason.strip()
+
+
 def _approved_execution_target(root: Path, task_file_value: str) -> tuple[Path, str]:
     try:
         task_path = validate_delegation_task_file(task_file_value)
@@ -540,6 +589,8 @@ def _retry_execution_target(root: Path, run_id: str) -> str:
         summary = _summary_from_evidence(_run_evidence(root, run_dir), run_dir)
     except WorkbenchVerificationError as error:
         raise WorkbenchExecutionError(str(error)) from error
+    if _run_evidence(root, run_dir)["state"] == "abandoned":
+        raise WorkbenchExecutionError("captured_run_abandoned")
     if summary.run_status != "FAILED" and summary.verification_result != "FAIL":
         raise WorkbenchExecutionError("captured_run_not_retryable")
 
@@ -696,6 +747,11 @@ def _require_clean_promotion_review_repo(root: Path) -> None:
         raise WorkbenchPromotionReviewError("forge_repo_dirty")
 
 
+def _require_clean_abandonment_repo(root: Path) -> None:
+    if run_git(root, "status", "--porcelain").stdout.strip():
+        raise WorkbenchExecutionError("forge_repo_dirty")
+
+
 def _current_target_base_problem(evidence: dict) -> str | None:
     target = evidence.get("target", {})
     repo, branch, recorded_base = target.get("repo"), target.get("base_branch"), target.get("delegation_target_base_sha")
@@ -737,6 +793,17 @@ def _git_output_review(root: Path, args: list[str], reason: str) -> str:
 
 def _run_git_review(root: Path, args: list[str], reason: str) -> None:
     _git_output_review(root, args, reason)
+
+
+def _git_output_abandonment(root: Path, args: list[str], reason: str) -> str:
+    result = run_git(root, *args)
+    if result.returncode != 0:
+        raise WorkbenchExecutionError(reason)
+    return result.stdout.strip()
+
+
+def _run_git_abandonment(root: Path, args: list[str], reason: str) -> None:
+    _git_output_abandonment(root, args, reason)
 
 def _parse_verification_request(payload: object) -> str:
     if not isinstance(payload, dict) or set(payload) != {"run_id"}:
@@ -816,7 +883,27 @@ def _run_evidence(forge_root: Path, run_dir: Path) -> dict:
         raise WorkbenchVerificationError("captured_run_record_unavailable") from error
     if not isinstance(record, dict) or record.get("run_id") != run_dir.name:
         raise WorkbenchVerificationError("captured_run_record_invalid")
-    return summarize_run(run_dir, forge_root)
+    evidence = summarize_run(run_dir, forge_root)
+    if _abandonment_record(forge_root, run_dir.name) is not None:
+        evidence["state"] = "abandoned"
+    return evidence
+
+
+def _abandonment_record(forge_root: Path, run_id: str) -> dict | None:
+    path = f"reviews/abandon/{run_id}.json"
+    result = run_git(forge_root, "show", f"HEAD:{path}")
+    if result.returncode != 0:
+        return None
+    try:
+        record = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    if record.get("schema_version") != 1 or record.get("decision_type") != "abandon" or record.get("run_id") != run_id:
+        return None
+    reason = record.get("reason")
+    return record if isinstance(reason, str) and reason.strip() and len(reason) <= 500 else None
 
 
 def _summary_from_evidence(

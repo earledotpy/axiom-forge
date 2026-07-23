@@ -6,7 +6,7 @@ from app.workbench_drafts import default_repo_from_origin, fetch_issue_with_gh, 
 from app.workbench_html import WORKBENCH_HTML
 from app.workbench_http import make_handler
 from app.workbench_models import (
-    DEFAULT_ADAPTERS, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
+    DEFAULT_ADAPTERS, AbandonedCapturedRun, ApprovedDelegation, CapturedRun, ConfirmedExecution, ConfirmedRetry,
     DraftTaskPreview, HistoricalCapturedRun, IssueContext, IssueFetcher, IssueReference,
     OperatorEvidenceDetails, OperatorEvidenceSummary, PromotionResult, PromotionReviewPreparation,
     PromotionReviewSubmission, TargetRunner, VerificationRunner, WorkbenchApprovalError,

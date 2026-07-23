@@ -860,6 +860,49 @@ WORKBENCH_HTML = r"""<!doctype html>
         });
         retry.append(retryNote, retryLabel, retryAdapter, retryConfirmationLabel, retryButton);
         evidenceSummary.append(retry);
+        const abandonReasonLabel = document.createElement("label");
+        abandonReasonLabel.textContent = "Why abandon this run?";
+        const abandonReason = document.createElement("input");
+        abandonReason.required = true;
+        abandonReason.maxLength = 500;
+        abandonReasonLabel.append(abandonReason);
+        const abandonButton = document.createElement("button");
+        abandonButton.type = "button";
+        abandonButton.className = "ghost";
+        abandonButton.textContent = "Abandon Run";
+        abandonButton.addEventListener("click", async () => {
+          const confirmation = await requestOperatorConfirmation({
+            title: "Abandon captured run",
+            message: `Type the exact run ID to abandon ${runId}. This permanently removes it from the decision queue.`,
+            runId,
+          });
+          if (confirmation === null) return;
+          if (!abandonReason.value.trim()) {
+            error.textContent = "abandonment_reason_required";
+            error.classList.remove("hidden");
+            abandonReason.focus();
+            return;
+          }
+          abandonButton.disabled = true;
+          try {
+            const response = await fetch("/api/abandon", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ run_id: runId, confirmation, reason: abandonReason.value }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error || "abandon_failed");
+            await renderEvidenceSummary(runId, false, true);
+            await renderHistoricalRuns();
+            await renderDecisionQueue();
+          } catch (abandonError) {
+            error.textContent = abandonError.message;
+            error.classList.remove("hidden");
+          } finally {
+            abandonButton.disabled = false;
+          }
+        });
+        retry.append(abandonReasonLabel, abandonButton);
       }
       const details = document.createElement("details");
       const summary = document.createElement("summary");
