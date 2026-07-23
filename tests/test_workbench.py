@@ -813,6 +813,16 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('Prior failed evidence summary', WORKBENCH_HTML)
         self.assertIn('evidenceSummary.cloneNode(true)', WORKBENCH_HTML)
 
+    def test_workbench_html_uses_an_in_page_dialog_for_execution_and_promotion(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('id="operator-confirmation-dialog"', WORKBENCH_HTML)
+        self.assertIn('requestOperatorConfirmation', WORKBENCH_HTML)
+        self.assertIn('Type the exact run ID to promote', WORKBENCH_HTML)
+        self.assertIn('operator_confirmation_mismatch', WORKBENCH_HTML)
+        self.assertNotIn('window.confirm', WORKBENCH_HTML)
+        self.assertNotIn('window.prompt', WORKBENCH_HTML)
+
     def test_http_summary_keeps_raw_evidence_in_the_drill_down_endpoint(self):
         run_id = '20260712-010203-123456'
         workbench, root = self.make_workbench()

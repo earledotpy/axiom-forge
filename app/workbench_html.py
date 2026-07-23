@@ -301,6 +301,21 @@ WORKBENCH_HTML = r"""<!doctype html>
       font-family: var(--mono);
       font-size: 12px;
     }
+    dialog {
+      width: min(440px, calc(100vw - 32px));
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--panel);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+      padding: 20px;
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, .45); }
+    dialog h2 { margin: 0 0 8px; font-size: 17px; }
+    dialog p { margin: 0; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .dialog-actions button { margin-top: 0; }
+    #operator-confirmation-error { margin-top: 8px; }
     @media (max-width: 820px) {
       main, .grid {
         display: block;
@@ -424,6 +439,20 @@ WORKBENCH_HTML = r"""<!doctype html>
       <div id="evidence-summary" class="hidden"></div>
     </section>
   </main>
+  <dialog id="operator-confirmation-dialog" aria-labelledby="operator-confirmation-title">
+    <form id="operator-confirmation-form" method="dialog">
+      <h2 id="operator-confirmation-title"></h2>
+      <p id="operator-confirmation-message"></p>
+      <label id="operator-confirmation-input-label" for="operator-confirmation-input" class="hidden">Run ID
+        <input id="operator-confirmation-input" autocomplete="off">
+      </label>
+      <div id="operator-confirmation-error" class="error hidden"></div>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel" formnovalidate class="ghost">Cancel</button>
+        <button id="operator-confirmation-submit" type="submit" value="confirm">Confirm</button>
+      </div>
+    </form>
+  </dialog>
   <script>
     const form = document.querySelector("#issue-form");
     const button = document.querySelector("#load-button");
@@ -452,6 +481,13 @@ WORKBENCH_HTML = r"""<!doctype html>
     const planningSessionList = document.querySelector("#planning-session-list");
     const planningTranscript = document.querySelector("#planning-transcript");
     const pipelineStrip = document.querySelector("#pipeline-strip");
+    const operatorConfirmationDialog = document.querySelector("#operator-confirmation-dialog");
+    const operatorConfirmationForm = document.querySelector("#operator-confirmation-form");
+    const operatorConfirmationTitle = document.querySelector("#operator-confirmation-title");
+    const operatorConfirmationMessage = document.querySelector("#operator-confirmation-message");
+    const operatorConfirmationInputLabel = document.querySelector("#operator-confirmation-input-label");
+    const operatorConfirmationInput = document.querySelector("#operator-confirmation-input");
+    const operatorConfirmationError = document.querySelector("#operator-confirmation-error");
     const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
     const stageStyles = {
       planning_proposals: { tag: "Approve", color: "var(--st-approve)" },
@@ -463,6 +499,31 @@ WORKBENCH_HTML = r"""<!doctype html>
       retry_decision: { tag: "Retry", color: "var(--st-retry)" },
       evidence_problems: { tag: "Problem", color: "var(--st-prob)" },
     };
+    function requestOperatorConfirmation({ title, message, runId = null }) {
+      operatorConfirmationTitle.textContent = title;
+      operatorConfirmationMessage.textContent = message;
+      operatorConfirmationInput.value = "";
+      operatorConfirmationInput.required = Boolean(runId);
+      operatorConfirmationInputLabel.classList.toggle("hidden", !runId);
+      operatorConfirmationError.classList.add("hidden");
+      operatorConfirmationDialog.dataset.runId = runId || "";
+      return new Promise((resolve) => {
+        operatorConfirmationDialog.addEventListener("close", () => {
+          resolve(operatorConfirmationDialog.returnValue === "confirm" ? operatorConfirmationInput.value : null);
+        }, { once: true });
+        operatorConfirmationDialog.showModal();
+        if (runId) operatorConfirmationInput.focus();
+      });
+    }
+    operatorConfirmationForm.addEventListener("submit", (event) => {
+      const runId = operatorConfirmationDialog.dataset.runId;
+      if (event.submitter.value === "confirm" && runId && operatorConfirmationInput.value !== runId) {
+        event.preventDefault();
+        operatorConfirmationError.textContent = "operator_confirmation_mismatch: type the exact run ID.";
+        operatorConfirmationError.classList.remove("hidden");
+        operatorConfirmationInput.focus();
+      }
+    });
     function factGrid(rows) {
       const list = document.createElement("dl");
       list.className = "facts";
@@ -929,7 +990,11 @@ WORKBENCH_HTML = r"""<!doctype html>
       error.classList.add("hidden");
       try {
         if (item.action === "execute") {
-          if (!window.confirm(`Start approved delegation ${item.task_file}?`)) return;
+          const confirmation = await requestOperatorConfirmation({
+            title: "Execute approved delegation",
+            message: `Start approved delegation ${item.task_file}?`,
+          });
+          if (confirmation === null) return;
           const response = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -941,7 +1006,11 @@ WORKBENCH_HTML = r"""<!doctype html>
         } else if (item.action === "verify") {
           await renderEvidenceSummary(item.run_id, true);
         } else if (item.action === "promote") {
-          const confirmation = window.prompt(`Type the exact run ID to promote ${item.run_id}:`);
+          const confirmation = await requestOperatorConfirmation({
+            title: "Promote verified patch",
+            message: `Type the exact run ID to promote ${item.run_id}:`,
+            runId: item.run_id,
+          });
           if (confirmation === null) return;
           evidenceSummary.textContent = `Promotion in progress for ${item.run_id}…`;
           evidenceSummary.classList.remove("hidden");
