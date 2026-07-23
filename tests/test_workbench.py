@@ -1049,7 +1049,8 @@ class TestWorkbench(unittest.TestCase):
         self.assertIn('if (!readOnly && payload.verification_result === "NOT_RUN"', WORKBENCH_HTML)
         self.assertIn('if (!readOnly && (payload.run_status === "FAILED"', WORKBENCH_HTML)
         self.assertIn('renderEvidenceSummary(entry.run_id, false, true)', WORKBENCH_HTML)
-        self.assertLess(WORKBENCH_HTML.index('id="evidence-summary"'), WORKBENCH_HTML.index('</aside>'))
+        self.assertLess(WORKBENCH_HTML.index('</aside>'), WORKBENCH_HTML.index('id="evidence-summary"'))
+        self.assertLess(WORKBENCH_HTML.index('id="evidence-summary"'), WORKBENCH_HTML.index('</section>'))
 
     def test_workbench_html_includes_a_display_only_live_run_view(self):
         from app.workbench import WORKBENCH_HTML

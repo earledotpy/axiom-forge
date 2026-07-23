@@ -6,114 +6,145 @@ WORKBENCH_HTML = r"""<!doctype html>
   <title>Axiom Forge Workbench</title>
   <style>
     :root {
-      color-scheme: light;
-      font-family: Arial, sans-serif;
-      --ink: #17202a;
-      --muted: #637083;
-      --line: #d6dde6;
-      --panel: #f7f9fb;
-      --accent: #0d766e;
-      --danger: #b42318;
+      color-scheme: light dark;
+      --bg: #EFF1F4; --panel: #FFFFFF; --rail: #E7EAEE;
+      --ink: #22262C; --muted: #6C7480; --line: #D4D9DF;
+      --accent: #2E5F8A; --accent-ink: #FFFFFF;
+      --danger: #A84439; --ok: #3E7A4E;
+      --st-approve: #2E5F8A; --st-exec: #96731F; --st-verify: #0F6E6E;
+      --st-review: #3E7A4E; --st-retry: #A84439; --st-prob: #8A4A7D;
+      --term: #14181D; --term-ink: #C4CDD6;
+      --mono: "Cascadia Code", Consolas, "Liberation Mono", Menlo, monospace;
+      --body-font: "Segoe UI", -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171A1E; --panel: #1F242A; --rail: #1A1E23;
+        --ink: #E3E6EA; --muted: #8B939E; --line: #333A42;
+        --accent: #7FA8D0; --accent-ink: #0E1826;
+        --danger: #D3766B; --ok: #6FB07E;
+        --st-approve: #7FA8D0; --st-exec: #CCA84E; --st-verify: #5BB0B0;
+        --st-review: #6FB07E; --st-retry: #D3766B; --st-prob: #C08AB4;
+        --term: #111418; --term-ink: #B9C2CC;
+      }
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: #ffffff;
+      background: var(--bg);
       color: var(--ink);
+      font: 14px/1.5 var(--body-font);
     }
     header {
       border-bottom: 1px solid var(--line);
-      padding: 18px 28px;
+      padding: 14px 28px;
+      background: var(--panel);
     }
     h1 {
-      font-size: 22px;
+      font-size: 18px;
       line-height: 1.2;
       margin: 0;
-      letter-spacing: 0;
+      letter-spacing: .01em;
     }
     main {
       display: grid;
-      grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
-      min-height: calc(100vh - 59px);
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+      min-height: calc(100vh - 53px);
     }
     aside {
       border-right: 1px solid var(--line);
-      padding: 24px 28px;
-      background: var(--panel);
+      padding: 20px 22px;
+      background: var(--rail);
     }
     section {
       padding: 24px 32px 40px;
+      background: var(--panel);
     }
     label {
       display: block;
-      font-weight: 700;
-      font-size: 13px;
-      margin: 18px 0 7px;
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 14px 0 5px;
     }
     input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 5px;
       color: var(--ink);
-      background: #ffffff;
+      background: var(--bg);
       font: inherit;
-      font-size: 14px;
+      font-size: 13.5px;
     }
+    section input, section textarea, section select { background: var(--bg); }
+    aside input, aside select { background: var(--panel); }
     input, select {
-      min-height: 40px;
-      padding: 8px 10px;
+      min-height: 36px;
+      padding: 7px 10px;
     }
     input[type="checkbox"] {
       width: auto;
       min-height: auto;
-      margin: 0 8px 0 0;
+      margin: 2px 8px 0 0;
     }
     textarea {
-      min-height: 120px;
+      min-height: 110px;
       padding: 10px;
       resize: vertical;
-      font-family: Consolas, "Liberation Mono", monospace;
-      line-height: 1.45;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.5;
     }
     button {
-      margin-top: 14px;
-      width: 100%;
-      min-height: 40px;
+      margin-top: 12px;
+      min-height: 34px;
+      padding: 7px 16px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 5px;
       background: var(--accent);
-      color: #ffffff;
-      font-weight: 700;
+      color: var(--accent-ink);
+      font: 600 13px var(--body-font);
       cursor: pointer;
     }
     button:disabled {
       cursor: progress;
       opacity: 0.65;
     }
+    button.ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+    button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    aside form button { width: 100%; }
     .meta {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12.5px;
       line-height: 1.45;
       overflow-wrap: anywhere;
     }
+    pre { font-family: var(--mono); font-size: 12px; }
     .issue {
       border-bottom: 1px solid var(--line);
       padding-bottom: 20px;
       margin-bottom: 22px;
     }
     .issue h2 {
-      font-size: 18px;
+      font-size: 17px;
       margin: 0 0 8px;
       letter-spacing: 0;
     }
     .issue pre {
       white-space: pre-wrap;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 5px;
       padding: 12px;
       max-height: 260px;
       overflow: auto;
-      background: #ffffff;
+      background: var(--bg);
     }
     .grid {
       display: grid;
@@ -141,38 +172,131 @@ WORKBENCH_HTML = r"""<!doctype html>
       display: flex;
       align-items: flex-start;
       font-weight: 400;
+      font-size: 13.5px;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--ink);
       line-height: 1.45;
     }
     .approved {
-      color: var(--accent);
+      color: var(--ok);
       font-weight: 700;
       margin-top: 12px;
       overflow-wrap: anywhere;
     }
+    .pipeline {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin: 14px 0 2px;
+    }
+    .pipeline .pst {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--stc, var(--muted));
+      white-space: nowrap;
+    }
+    .pipeline .pst b {
+      font: 600 11.5px var(--mono);
+      background: color-mix(in srgb, var(--stc, var(--muted)) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--stc, var(--muted)) 40%, transparent);
+      border-radius: 3px;
+      padding: 0 5px;
+    }
+    .pipeline .sep { color: var(--muted); font-size: 10px; }
     .queue-stage {
       border-top: 1px solid var(--line);
-      padding: 18px 0;
+      padding: 14px 0;
     }
-    .queue-stage h3 { font-size: 16px; margin: 0 0 10px; }
+    .queue-stage h3 {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 6px;
+    }
     .queue-card {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #ffffff;
+      border-left: 3px solid var(--stc, var(--line));
+      border-radius: 5px;
+      background: var(--bg);
       margin: 10px 0;
-      padding: 12px;
+      padding: 12px 14px;
     }
-    .queue-card .meta { font-family: Consolas, "Liberation Mono", monospace; margin-top: 6px; }
+    .queue-card .tag {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: var(--stc, var(--muted));
+      border: 1px solid color-mix(in srgb, var(--stc, var(--muted)) 45%, transparent);
+      background: color-mix(in srgb, var(--stc, var(--muted)) 10%, transparent);
+      border-radius: 3px;
+      padding: 1px 6px;
+      margin: 0 0 6px;
+    }
+    .queue-card strong { display: block; font-size: 13.5px; line-height: 1.35; }
+    .queue-card .meta { font-family: var(--mono); font-size: 11.5px; margin-top: 6px; }
     .queue-card button { margin-top: 10px; }
     .queue-card.planning-default-proposal { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .facts {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 4px 14px;
+      margin: 8px 0 0;
+      font-size: 12.5px;
+    }
+    .facts dt { color: var(--muted); }
+    .facts dd { margin: 0; font: 12px var(--mono); overflow-wrap: anywhere; }
+    .facts dd.ok { color: var(--ok); font-weight: 600; }
+    .facts dd.bad { color: var(--danger); font-weight: 600; }
+    .stage-overflow > summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 12.5px;
+      margin: 6px 0;
+    }
+    .quiet-stages {
+      border-top: 1px solid var(--line);
+      padding: 12px 0 0;
+    }
+    .history { margin-top: 22px; }
+    .history summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .history ul { list-style: none; margin: 10px 0 0; padding: 0; }
+    .history li { border-top: 1px solid var(--line); padding: 8px 0; }
+    .history li strong { font: 600 11.5px var(--mono); overflow-wrap: anywhere; }
+    .history li button { margin-top: 6px; min-height: 26px; padding: 3px 10px; font-size: 12px; }
+    #live-run-stdout, #live-run-stderr {
+      background: var(--term);
+      color: var(--term-ink);
+      border-radius: 5px;
+      padding: 10px 12px;
+      max-height: 320px;
+      overflow: auto;
+    }
     .planning-transcript {
       min-height: 180px;
       max-height: 420px;
       overflow: auto;
       white-space: pre-wrap;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel);
+      border-radius: 5px;
+      background: var(--bg);
       padding: 12px;
+      font-family: var(--mono);
+      font-size: 12px;
     }
     @media (max-width: 820px) {
       main, .grid {
@@ -202,18 +326,20 @@ WORKBENCH_HTML = r"""<!doctype html>
       </form>
       <p class="meta">Draft artifacts stay editable here. Only explicit approval creates committed delegation authority.</p>
       <div class="history">
-        <h2>Historical captured runs</h2>
-        <div id="run-history" class="meta">Loading captured-run history…</div>
+        <details id="history-details">
+          <summary>Historical captured runs</summary>
+          <div id="run-history" class="meta">Loading captured-run history…</div>
+        </details>
       </div>
-      <div id="evidence-summary" class="hidden"></div>
     </aside>
     <section>
       <div id="decision-queue">
         <div class="issue">
           <h2>Operator decision queue</h2>
           <p class="meta">Nothing awaiting a decision is invisible. This queue is re-derived from Forge-owned delegation artifacts and captured evidence each time it loads.</p>
+          <div id="pipeline-strip" class="pipeline hidden"></div>
           <button id="start-draft-button" type="button">Prepare a new task</button>
-          <button id="start-planning-button" type="button">Start planning session</button>
+          <button id="start-planning-button" type="button" class="ghost">Start planning session</button>
         </div>
         <div id="decision-queue-stages" class="meta">Loading operator decisions…</div>
       </div>
@@ -292,6 +418,7 @@ WORKBENCH_HTML = r"""<!doctype html>
         </div>
       </div>
       </div>
+      <div id="evidence-summary" class="hidden"></div>
     </section>
   </main>
   <script>
@@ -321,7 +448,72 @@ WORKBENCH_HTML = r"""<!doctype html>
     const startPlanningButton = document.querySelector("#start-planning-button");
     const planningSessionList = document.querySelector("#planning-session-list");
     const planningTranscript = document.querySelector("#planning-transcript");
+    const pipelineStrip = document.querySelector("#pipeline-strip");
     const retryAdapters = ["codex", "claude-code", "copilot", "opencode", "cursor", "kiro", "qoder", "kilo", "antigravity"];
+    const stageStyles = {
+      planning_proposals: { tag: "Approve", color: "var(--st-approve)" },
+      awaiting_execution: { tag: "Execute", color: "var(--st-approve)" },
+      executing: { tag: "Executing", color: "var(--st-exec)" },
+      awaiting_verification: { tag: "Verify", color: "var(--st-verify)" },
+      awaiting_promotion_review: { tag: "Review", color: "var(--st-review)" },
+      awaiting_promotion: { tag: "Promote", color: "var(--st-review)" },
+      retry_decision: { tag: "Retry", color: "var(--st-retry)" },
+      evidence_problems: { tag: "Problem", color: "var(--st-prob)" },
+    };
+    function factGrid(rows) {
+      const list = document.createElement("dl");
+      list.className = "facts";
+      let rendered = 0;
+      rows.forEach(([label, value, tone]) => {
+        if (value === null || value === undefined || value === "") return;
+        const term = document.createElement("dt");
+        term.textContent = label;
+        const detail = document.createElement("dd");
+        detail.textContent = value;
+        if (tone) detail.className = tone;
+        list.append(term, detail);
+        rendered += 1;
+      });
+      return rendered ? list : null;
+    }
+    function statusTone(value, good, bad) {
+      if (value === good) return "ok";
+      if (value === bad) return "bad";
+      return null;
+    }
+    function queueItemFacts(item) {
+      const rows = [
+        ["Run", item.run_id],
+        ["Task", item.task_file],
+        ["Adapter", item.adapter],
+      ];
+      if (item.planning_session_id) {
+        rows.push(["Session", item.planning_session_id.slice(0, 8)
+          + (item.planning_proposal_version ? ` · proposal ${item.planning_proposal_version}` : "")]);
+        rows.push(["Authority", "draft-only"]);
+      }
+      rows.push(
+        ["Run status", item.run_status, statusTone(item.run_status, "COMPLETED", "FAILED")],
+        ["Verification", item.verification_result, statusTone(item.verification_result, "PASS", "FAIL")],
+        ["Acceptance", item.acceptance_result, statusTone(item.acceptance_result, "PASS", "FAIL")],
+        ["Changed paths", (item.changed_paths || []).join(", ")],
+        ["Failure", item.failure_reason, "bad"],
+        ["Evidence error", item.evidence_error, "bad"],
+      );
+      if (item.stage === "awaiting_promotion") {
+        rows.push(
+          ["Target", item.target_repository],
+          ["Branch", item.target_branch],
+          ["Base", item.target_base_sha],
+          ["Reviewer", item.reviewer],
+          ["Decision", item.review_decision],
+          ["Concerns", item.review_concerns],
+          ["Review revision", item.promotion_review_revision],
+          ["Blocker", item.current_blocker, item.current_blocker ? "bad" : null],
+        );
+      }
+      return factGrid(rows);
+    }
     let loadedIssue = null;
     let approvedDelegation = null;
     let selectedPlanningSession = null;
@@ -505,6 +697,7 @@ WORKBENCH_HTML = r"""<!doctype html>
         ["Next allowed actions", (payload.next_allowed_actions || []).join(", ")],
       ];
       const list = document.createElement("dl");
+      list.className = "facts";
       fields.forEach(([label, value]) => {
         const term = document.createElement("dt");
         term.textContent = label;
@@ -635,6 +828,7 @@ WORKBENCH_HTML = r"""<!doctype html>
       const heading = document.createElement("h3");
       heading.textContent = `Promotion review: ${preparation.run_id}`;
       const evidence = document.createElement("dl");
+      evidence.className = "facts";
       [
         ["Task intent", preparation.task_intent],
         ["Delegation artifact revision", preparation.delegation_artifact_revision || "missing"],
@@ -780,32 +974,58 @@ WORKBENCH_HTML = r"""<!doctype html>
         return;
       }
       decisionQueueStages.replaceChildren();
+      pipelineStrip.replaceChildren();
+      payload.stages.forEach((stage, index) => {
+        const style = stageStyles[stage.name] || {};
+        if (index) {
+          const sep = document.createElement("span");
+          sep.className = "sep";
+          sep.textContent = "→";
+          pipelineStrip.append(sep);
+        }
+        const pst = document.createElement("span");
+        pst.className = "pst";
+        if (style.color) pst.style.setProperty("--stc", style.color);
+        const count = document.createElement("b");
+        count.textContent = stage.items.length;
+        pst.append(`${style.tag || stage.label} `, count);
+        pipelineStrip.append(pst);
+      });
+      pipelineStrip.classList.remove("hidden");
+      const emptyStages = [];
       payload.stages.forEach((stage) => {
+        if (!stage.items.length) {
+          emptyStages.push(stage.label);
+          return;
+        }
+        const style = stageStyles[stage.name] || {};
         const section = document.createElement("section");
         section.className = "queue-stage";
+        if (style.color) section.style.setProperty("--stc", style.color);
         const heading = document.createElement("h3");
         heading.textContent = `${stage.label} (${stage.items.length})`;
         section.append(heading);
-        if (!stage.items.length) {
-          const emptyStage = document.createElement("p");
-          emptyStage.className = "meta";
-          emptyStage.textContent = `Nothing in ${stage.label.toLowerCase()}.`;
-          section.append(emptyStage);
-        }
-        stage.items.forEach((item) => {
+        const renderCard = (item) => {
           const card = document.createElement("article");
           card.className = "queue-card";
+          if (style.color) card.style.setProperty("--stc", style.color);
+          if (style.tag) {
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = style.tag;
+            card.append(tag);
+          }
           const decision = document.createElement("strong");
           decision.textContent = item.decision_label;
-          const evidence = document.createElement("div");
-          evidence.className = "meta";
-          evidence.textContent = item.evidence_line;
-          card.append(decision, evidence);
-          if (item.stage === "awaiting_promotion") {
-            const reviewEvidence = document.createElement("div");
-            reviewEvidence.className = "meta";
-            reviewEvidence.textContent = `Target ${item.target_repository || "missing"} · branch ${item.target_branch || "missing"} · base ${item.target_base_sha || "missing"} · reviewer ${item.reviewer || "missing"} · decision ${item.review_decision || "missing"} · concerns ${item.review_concerns || "missing"} · review ${item.promotion_review_revision || "missing"} · blocker ${item.current_blocker || "none"}`;
-            card.append(reviewEvidence);
+          card.append(decision);
+          const facts = queueItemFacts(item);
+          if (facts) {
+            card.append(facts);
+          } else {
+            const evidence = document.createElement("div");
+            evidence.className = "meta";
+            evidence.textContent = item.evidence_line;
+            card.append(evidence);
           }
           if (item.action_label) {
             const action = document.createElement("button");
@@ -814,10 +1034,27 @@ WORKBENCH_HTML = r"""<!doctype html>
             action.addEventListener("click", () => runQueueAction(item));
             card.append(action);
           }
-          section.append(card);
-        });
+          return card;
+        };
+        stage.items.slice(0, 3).forEach((item) => section.append(renderCard(item)));
+        const overflow = stage.items.slice(3);
+        if (overflow.length) {
+          const more = document.createElement("details");
+          more.className = "stage-overflow";
+          const summary = document.createElement("summary");
+          summary.textContent = `Show ${overflow.length} more…`;
+          more.append(summary);
+          overflow.forEach((item) => more.append(renderCard(item)));
+          section.append(more);
+        }
         decisionQueueStages.append(section);
       });
+      if (emptyStages.length) {
+        const quiet = document.createElement("p");
+        quiet.className = "meta quiet-stages";
+        quiet.textContent = `Nothing waiting in: ${emptyStages.join(" · ")}.`;
+        decisionQueueStages.append(quiet);
+      }
     }
 
     startDraftButton.addEventListener("click", () => {
@@ -1016,6 +1253,8 @@ WORKBENCH_HTML = r"""<!doctype html>
         return;
       }
       runHistory.replaceChildren();
+      const historySummary = document.querySelector("#history-details summary");
+      historySummary.textContent = `Historical captured runs (${payload.runs.length})`;
       if (!payload.runs.length) {
         runHistory.textContent = "No captured runs are available.";
         return;
@@ -1042,6 +1281,7 @@ WORKBENCH_HTML = r"""<!doctype html>
         if (summary) {
           const button = document.createElement("button");
           button.type = "button";
+          button.className = "ghost";
           button.textContent = "View evidence summary";
           button.addEventListener("click", async () => {
             try {

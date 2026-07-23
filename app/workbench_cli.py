@@ -39,3 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_server(args.host, args.port, args.open)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
