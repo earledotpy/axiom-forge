@@ -236,6 +236,25 @@ fi
 
 expect_pass "base unit tests pass" python -m unittest discover -s tests
 
+say "Operator approval"
+
+RUN_ID="test-operator-approval"
+expect_pass "T0_operator_exact_run_id_passes" \
+  bash -c "printf '$RUN_ID\\n' | bash scripts/require_operator_approval.sh '$RUN_ID'"
+expect_pass "T0a_operator_crlf_run_id_passes" \
+  bash -c "printf '$RUN_ID\\r\\n' | bash scripts/require_operator_approval.sh '$RUN_ID'"
+
+APPROVAL_STDERR="$TMPDIR/operator-approval-mismatch.err"
+if bash -c "printf 'wrong-id\\n' | bash scripts/require_operator_approval.sh '$RUN_ID'" \
+  >/dev/null 2>"$APPROVAL_STDERR"; then
+  fail "T0b_operator_mismatch_fails_closed"
+elif grep -q "operator_confirmation_mismatch" "$APPROVAL_STDERR"; then
+  pass "T0b_operator_mismatch_fails_closed"
+else
+  fail "T0b_operator_mismatch_reports_confirmation_reason"
+  cat "$APPROVAL_STDERR" >&2
+fi
+
 say "Failure cases"
 
 expect_fail "T1_missing_run_dir_fails" \
