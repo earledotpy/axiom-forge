@@ -890,6 +890,22 @@ class TestWorkbench(unittest.TestCase):
         self.assertNotIn('window.confirm', WORKBENCH_HTML)
         self.assertNotIn('window.prompt', WORKBENCH_HTML)
 
+    def test_promotion_outcome_reports_no_reason_on_success(self):
+        from app.workbench_runtime import _promotion_outcome
+
+        self.assertEqual(_promotion_outcome({"status": "PROMOTED", "reason": None}), ("promoted", None))
+        self.assertEqual(
+            _promotion_outcome({"status": "FAILED", "reason": "stale_base_sha"}),
+            ("failed", "stale_base_sha"),
+        )
+        self.assertEqual(_promotion_outcome({"status": "FAILED"}), ("failed", "promotion_failed"))
+
+    def test_workbench_html_wraps_the_promotion_outcome_block(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('result.className = "outcome"', WORKBENCH_HTML)
+        self.assertIn('pre.outcome { white-space: pre-wrap;', WORKBENCH_HTML)
+
     def test_workbench_html_offers_confirmed_abandonment_alongside_retry(self):
         from app.workbench import WORKBENCH_HTML
 

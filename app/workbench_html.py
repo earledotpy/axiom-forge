@@ -127,6 +127,7 @@ WORKBENCH_HTML = r"""<!doctype html>
       overflow-wrap: anywhere;
     }
     pre { font-family: var(--mono); font-size: 12px; }
+    pre.outcome { white-space: pre-wrap; overflow-wrap: anywhere; }
     .issue {
       border-bottom: 1px solid var(--line);
       padding-bottom: 20px;
@@ -1076,6 +1077,7 @@ WORKBENCH_HTML = r"""<!doctype html>
           const resultHeading = document.createElement("h3");
           resultHeading.textContent = payload.state === "promoted" ? "Promotion complete" : "Promotion failed closed";
           const result = document.createElement("pre");
+          result.className = "outcome";
           result.textContent = JSON.stringify({ state: payload.state, reason: payload.reason, branch: payload.branch, promotion_commit: payload.promotion_commit, promotion_review_revision: payload.promotion_review_revision, promotion_json: payload.promotion_record, diagnostics: payload.diagnostics }, null, 2);
           evidenceSummary.append(resultHeading, result);
           evidenceSummary.classList.remove("hidden");

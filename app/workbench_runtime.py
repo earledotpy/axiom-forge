@@ -263,8 +263,7 @@ class WorkbenchServer:
             command.append(run_dir.relative_to(self.forge_root).as_posix())
             result = subprocess.run(command, cwd=self.forge_root, text=True, input=run_id + "\n", capture_output=True, check=False)
             promotion = _evidence_json(run_dir / "promotion.json")
-            state = "promoted" if promotion.get("status") == "PROMOTED" else "failed"
-            reason = promotion.get("reason") if isinstance(promotion.get("reason"), str) else "promotion_failed"
+            state, reason = _promotion_outcome(promotion)
             diagnostics = _bounded_promotion_diagnostics(result.stdout, result.stderr)
             return PromotionResult("promotion", run_id, state, reason, promotion.get("branch") if isinstance(promotion.get("branch"), str) else None, promotion.get("promotion_commit") if isinstance(promotion.get("promotion_commit"), str) else None, promotion.get("promotion_review_revision") if isinstance(promotion.get("promotion_review_revision"), str) else None, promotion, diagnostics)
         except WorkbenchVerificationError as error:
@@ -657,6 +656,13 @@ def _runner_diagnostic_tail(result: subprocess.CompletedProcess[str]) -> str:
     if len(scrubbed) > _RUNNER_DIAGNOSTIC_TAIL_LIMIT:
         return "...[truncated]\n" + scrubbed[-_RUNNER_DIAGNOSTIC_TAIL_LIMIT:]
     return scrubbed
+
+
+def _promotion_outcome(promotion: dict) -> tuple[str, str | None]:
+    if promotion.get("status") == "PROMOTED":
+        return "promoted", None
+    reason = promotion.get("reason")
+    return "failed", reason if isinstance(reason, str) else "promotion_failed"
 
 
 def _captured_run_from_runner_result(
