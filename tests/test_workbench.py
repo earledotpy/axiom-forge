@@ -6,6 +6,7 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from scripts.delegation_artifact_set import load_task_artifact_set
@@ -285,6 +286,31 @@ class TestWorkbench(unittest.TestCase):
         self.assertEqual(payload["authority"], "approved_delegation")
         self.assertEqual(payload["adapter"], "codex")
         self.assertTrue((root / payload["task_file"]).exists())
+
+    def test_http_approval_endpoint_reports_existing_delegation_reason(self):
+        workbench, _ = self.make_workbench()
+        workbench.approve_draft(self.approval_payload())
+        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(workbench))
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = Request(
+                f"http://127.0.0.1:{server.server_port}/api/approve",
+                data=json.dumps(self.approval_payload()).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(request)
+            payload = json.loads(caught.exception.read().decode("utf-8"))
+            caught.exception.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(caught.exception.code, 400)
+        self.assertEqual(payload, {"error": "delegation_artifact_already_exists"})
 
     def test_confirmed_execution_runs_only_the_approved_target_mode_task(self):
         calls = []
@@ -766,6 +792,15 @@ class TestWorkbench(unittest.TestCase):
             self.assertIn(field, WORKBENCH_HTML)
         self.assertIn('renderEvidenceSummary', WORKBENCH_HTML)
         self.assertIn('/api/runs/${runId}/details', WORKBENCH_HTML)
+
+    def test_workbench_html_distinguishes_approval_success_from_rejection(self):
+        from app.workbench import WORKBENCH_HTML
+
+        self.assertIn('Delegation approved:', WORKBENCH_HTML)
+        self.assertIn('Approval rejected:', WORKBENCH_HTML)
+        self.assertIn('delegation_artifact_already_exists', WORKBENCH_HTML)
+        self.assertIn('delegation for this issue was already approved', WORKBENCH_HTML)
+        self.assertIn('approval-failed', WORKBENCH_HTML)
 
     def test_workbench_html_presents_confirmed_operator_directed_retry(self):
         from app.workbench import WORKBENCH_HTML

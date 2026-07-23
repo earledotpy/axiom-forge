@@ -178,11 +178,14 @@ WORKBENCH_HTML = r"""<!doctype html>
       color: var(--ink);
       line-height: 1.45;
     }
-    .approved {
-      color: var(--ok);
+    .approved, .approval-failed {
       font-weight: 700;
       margin-top: 12px;
       overflow-wrap: anywhere;
+    }
+    .approved { color: var(--ok); }
+    .approval-failed {
+      color: var(--danger);
     }
     .pipeline {
       display: flex;
@@ -547,6 +550,7 @@ WORKBENCH_HTML = r"""<!doctype html>
       const issue = payload.source_issue;
       loadedIssue = issue;
       approvalConfirmation.checked = false;
+      approvalResult.classList.remove("approved", "approval-failed");
       approvalResult.classList.add("hidden");
       approvedDelegation = null;
       executionConfirmation.checked = false;
@@ -571,6 +575,19 @@ WORKBENCH_HTML = r"""<!doctype html>
 
       empty.classList.add("hidden");
       preview.classList.remove("hidden");
+    }
+
+    function approvalFailureMessage(reason) {
+      if (reason === "delegation_artifact_already_exists") {
+        return "Approval rejected: delegation for this issue was already approved. Its task, scope, and acceptance artifacts already exist.";
+      }
+      return `Approval rejected: ${reason}`;
+    }
+
+    function showApprovalResult(message, status) {
+      approvalResult.textContent = message;
+      approvalResult.classList.remove("hidden", "approved", "approval-failed");
+      approvalResult.classList.add(status === "failed" ? "approval-failed" : "approved");
     }
 
     approveButton.addEventListener("click", async () => {
@@ -602,15 +619,16 @@ WORKBENCH_HTML = r"""<!doctype html>
         if (!response.ok) {
           throw new Error(payload.error || "delegation_approval_failed");
         }
-        approvalResult.textContent = `Approved authority: ${payload.task_file}, ${payload.scope_file}, and ${payload.acceptance_file} at ${payload.delegation_artifact_revision}.`;
-        approvalResult.classList.remove("hidden");
+        showApprovalResult(
+          `Delegation approved: ${payload.task_file}, ${payload.scope_file}, and ${payload.acceptance_file} at ${payload.delegation_artifact_revision}.`,
+          "approved",
+        );
         approvedDelegation = payload;
         executionConfirmation.checked = false;
         executionResult.classList.add("hidden");
         execution.classList.remove("hidden");
       } catch (approvalError) {
-        error.textContent = approvalError.message;
-        error.classList.remove("hidden");
+        showApprovalResult(approvalFailureMessage(approvalError.message), "failed");
       } finally {
         approveButton.disabled = false;
       }
